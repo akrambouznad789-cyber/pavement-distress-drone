@@ -1,0 +1,19 @@
+# Data & model artifacts (never commit large binaries)
+data/**
+!data/README.md
+models/**
+!models/.gitkeep
+outputs/**
+!outputs/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
