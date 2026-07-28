@@ -1,0 +1,61 @@
+# ============================================================
+#  Central configuration — single source of truth
+# ============================================================
+
+project:
+  name: pavement-distress-drone
+  seed: 42
+
+# ---- Data ----------------------------------------------------
+data:
+  # Root folder where you extracted the raw dataset (git-ignored).
+  raw_dir: data/UAV-PDD2023
+  # Where the YOLO-formatted dataset will be written.
+  yolo_dir: data/yolo
+  # Train / val / test split ratios (must sum to 1.0).
+  split: [0.8, 0.1, 0.1]
+  # Distress classes (order defines the class indices).
+  classes:
+    - longitudinal_crack
+    - transverse_crack
+    - oblique_crack
+    - alligator_crack
+    - pothole
+    - repair
+
+# ---- Model / training ---------------------------------------
+train:
+  model: yolo11n.pt        # nano is a good CPU/Colab starting point; scale up later
+  imgsz: 640
+  epochs: 50
+  batch: 16
+  device: 0                # 0 = first GPU, "cpu" if none
+  project_dir: models
+  run_name: baseline
+
+# ---- Inference ----------------------------------------------
+inference:
+  weights: models/baseline/weights/best.pt
+  conf: 0.25
+  images_dir: data/new_survey
+  out_dir: outputs/detections
+
+# ---- Geospatial ---------------------------------------------
+geo:
+  # CRS for the output layer (EPSG:4326 = WGS84 lon/lat; use a local
+  # projected CRS for accurate distances — e.g. EPSG:32618 for Montréal / UTM 18N).
+  output_crs: "EPSG:4326"
+  metric_crs: "EPSG:32618"
+  # Road-network segments to aggregate onto (GeoPackage or Shapefile).
+  segments_path: data/road_segments.gpkg
+  # Max distance (metres, in metric_crs) to snap a detection to a segment.
+  snap_distance_m: 15
+  # Per-class severity weights used in the priority score.
+  severity_weights:
+    pothole: 5
+    alligator_crack: 4
+    transverse_crack: 3
+    longitudinal_crack: 2
+    oblique_crack: 2
+    repair: 1
+  out_layer: outputs/segment_priority.gpkg
