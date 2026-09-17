@@ -19,7 +19,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import yaml
-from shapely.geometry import MultiPoint, Point
+from shapely.geometry import Point
 from sklearn.cluster import DBSCAN
 
 
@@ -37,8 +37,15 @@ def find_hotspots(pts: gpd.GeoDataFrame, eps_m: float, min_samples: int) -> tupl
     for "noise" (an isolated detection with fewer than `min_samples`
     neighbours within `eps_m` -- not part of any hotspot).
 
-    Returns the per-point cluster labels, and one summary row per hotspot
-    (centroid + convex hull, so QGIS can draw a zone around each cluster).
+    Returns the per-point cluster labels, and one summary row per hotspot.
+
+    Each hotspot's geometry is the union of a small buffer (radius `eps_m / 2`)
+    around every member point, not a convex hull. A hotspot here is a
+    *cluster of nearby points along a road*, not a compact blob: its points
+    can span a bend in the street, and the convex hull of points on both arms
+    of a bend is a filled polygon covering the whole bend's interior --
+    correct geometrically, meaningless on a map. Buffering and unioning the
+    points instead produces a ribbon that hugs the points themselves.
     """
     coords = np.column_stack([pts.geometry.x, pts.geometry.y])
     labels = DBSCAN(eps=eps_m, min_samples=min_samples).fit_predict(coords)
@@ -46,13 +53,13 @@ def find_hotspots(pts: gpd.GeoDataFrame, eps_m: float, min_samples: int) -> tupl
     hotspots = []
     for hotspot_id in sorted(set(labels) - {-1}):
         members = pts.loc[labels == hotspot_id]
-        hull = MultiPoint(list(members.geometry)).convex_hull
+        corridor = members.geometry.buffer(eps_m / 2).union_all()
         hotspots.append(
             {
                 "hotspot_id": hotspot_id,
                 "n_detections": len(members),
                 "dominant_class": members["class_name"].value_counts().idxmax(),
-                "geometry": hull.centroid if hull.geom_type == "Point" else hull,
+                "geometry": corridor,
             }
         )
     hotspots_gdf = gpd.GeoDataFrame(hotspots, geometry="geometry", crs=pts.crs)

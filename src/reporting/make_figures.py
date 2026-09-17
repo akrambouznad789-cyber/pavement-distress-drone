@@ -12,9 +12,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import yaml
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 
 FIGURES_DIR = Path("figures")
 
@@ -149,6 +152,75 @@ def yolo_confusion_matrix():
     plt.close(fig)
 
 
+def qgis_priority_map():
+    """A publication-quality static map: segments colored by priority score,
+    the DBSCAN hotspot corridor, and a real basemap for geographic context.
+
+    Why generate this instead of pasting a QGIS screenshot: a plain
+    "right-click, apply graduated symbology" screenshot inherits QGIS's
+    default styling (thin lines, default legend placement, no title/scale
+    bar) and looks like a debug view, not a deliverable. This reproduces the
+    same information -- it reads the exact GeoPackage QGIS would open --
+    with deliberate cartographic styling (line weight, legend, scale bar,
+    north arrow) so the README shows a finished map, and QGIS is still where
+    you'd interactively explore the same file.
+    """
+    gpkg = Path("outputs/segment_priority.gpkg")
+    if not gpkg.exists():
+        return
+    with open("configs/config.yaml", encoding="utf-8") as f:
+        metric_crs = yaml.safe_load(f)["geo"]["metric_crs"]
+
+    segs = gpd.read_file(gpkg, layer="segment_priority").to_crs(metric_crs)
+    try:
+        hotspots = gpd.read_file(gpkg, layer="distress_hotspots").to_crs(metric_crs)
+    except Exception:
+        hotspots = gpd.GeoDataFrame()
+
+    fig, ax = plt.subplots(figsize=(8, 9))
+
+    segs.plot(
+        ax=ax, column="priority_score", cmap="RdYlGn_r", linewidth=5,
+        legend=True, legend_kwds={"label": "Priority score (higher = repair sooner)", "shrink": 0.55},
+        zorder=2,
+    )
+    if len(hotspots):
+        # Plotted after (on top of) the segments, semi-transparent, so it
+        # reads as a highlighted zone rather than being hidden underneath.
+        hotspots.plot(ax=ax, color="#dd6b20", alpha=0.45, zorder=3)
+
+    minx, miny, maxx, maxy = segs.total_bounds
+    pad = max(maxx - minx, maxy - miny) * 0.3
+    ax.set_xlim(minx - pad, maxx + pad)
+    ax.set_ylim(miny - pad, maxy + pad)
+
+    import contextily as ctx
+    ctx.add_basemap(ax, crs=metric_crs, source=ctx.providers.Esri.WorldGrayCanvas, zorder=1)
+
+    # Axes are in a metric CRS (UTM), so a size bar in data units is exact metres.
+    scalebar = AnchoredSizeBar(
+        ax.transData, 300, "300 m", loc="lower right",
+        pad=0.6, color="black", frameon=True, size_vertical=(maxy - miny) * 0.006,
+        fontproperties={"size": 9},
+    )
+    ax.add_artist(scalebar)
+    ax.annotate(
+        "N", xy=(0.05, 0.90), xytext=(0.05, 0.78), xycoords="axes fraction",
+        arrowprops=dict(facecolor="black", width=3, headwidth=10),
+        ha="center", fontsize=11, fontweight="bold",
+    )
+
+    ax.set_axis_off()
+    ax.set_title(
+        "Pavement maintenance priority — Chemin de la Côte-Sainte-Catherine, Montréal\n"
+        "(orange band = DBSCAN distress hotspot; synthetic demo, see README)",
+        fontsize=11,
+    )
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / "qgis_priority_map.png", dpi=200)
+    plt.close(fig)
+
+
 def main():
     FIGURES_DIR.mkdir(exist_ok=True)
     detection_class_distribution()
@@ -156,6 +228,7 @@ def main():
     copy_feature_importance()
     yolo_training_curves()
     yolo_confusion_matrix()
+    qgis_priority_map()
     print(f"Figures written to {FIGURES_DIR}/")
 
 
