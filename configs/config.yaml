@@ -50,6 +50,13 @@ geo:
   segments_path: data/road_segments.gpkg
   # Max distance (metres, in metric_crs) to snap a detection to a segment.
   snap_distance_m: 15
+  # DBSCAN hotspot clustering: groups detections that are close together in
+  # space, independent of segment boundaries -- a segment can look "fine" on
+  # average but still contain one dense hotspot worth flagging on its own.
+  # eps = neighborhood radius in metres (metric_crs); min_samples = detections
+  # required to form a hotspot (fewer than that is treated as noise, label -1).
+  hotspot_eps_m: 20
+  hotspot_min_samples: 3
   # Per-class severity weights used in the priority score.
   severity_weights:
     pothole: 5
@@ -59,3 +66,13 @@ geo:
     oblique_crack: 2
     repair: 1
   out_layer: outputs/segment_priority.gpkg
+
+# ---- Segment condition model (scikit-learn, tabular) ---------
+model:
+  # Synthetic training data: no real large-scale segment survey is available,
+  # so we simulate a plausible dataset (road class, traffic, pavement age ->
+  # priority score) to demonstrate the imputation workflow honestly.
+  n_synthetic_segments: 300
+  features_path: data/segment_features.csv
+  test_size: 0.2
+  out_dir: outputs/segment_model

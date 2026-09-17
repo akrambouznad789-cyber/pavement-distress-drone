@@ -1,8 +1,11 @@
 """
-Export the scored road segments as a QGIS-ready GeoPackage.
+Export the scored road segments (and DBSCAN hotspots, if any) as a QGIS-ready
+GeoPackage. A GeoPackage can hold several layers in one file, so both end up
+in the same .gpkg -- add both in QGIS to see segment-level priority and
+point-level damage hotspots on the same map.
 
-The layer carries `priority_score`, `priority_rank`, `n_detections`, and
-`worst_class`, so in QGIS you can apply a graduated symbology on
+The segment layer carries `priority_score`, `priority_rank`, `n_detections`,
+and `worst_class`, so in QGIS you can apply a graduated symbology on
 `priority_score` (e.g. green -> red) to see where to intervene first.
 
 A QGIS layer-style (.qml) is optional; here we just guarantee a clean GeoPackage.
@@ -34,6 +37,12 @@ def main(config_path: str):
     scored.to_crs(geo["output_crs"]).to_file(out, layer="segment_priority", driver="GPKG")
     print(f"QGIS layer written -> {out} (layer: segment_priority)")
     print("Open in QGIS and apply a graduated symbology on 'priority_score'.")
+
+    hotspots_path = Path("outputs") / "hotspots.gpkg"
+    if hotspots_path.exists():
+        hotspots = gpd.read_file(hotspots_path)
+        hotspots.to_crs(geo["output_crs"]).to_file(out, layer="distress_hotspots", driver="GPKG")
+        print(f"QGIS layer written -> {out} (layer: distress_hotspots, {len(hotspots)} hotspot(s))")
 
 
 if __name__ == "__main__":
