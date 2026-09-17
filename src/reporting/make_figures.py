@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+from shapely.geometry import Point
 
 FIGURES_DIR = Path("figures")
 
@@ -152,6 +153,117 @@ def yolo_confusion_matrix():
     plt.close(fig)
 
 
+def _metric_crs() -> str:
+    with open("configs/config.yaml", encoding="utf-8") as f:
+        return yaml.safe_load(f)["geo"]["metric_crs"]
+
+
+def _add_scalebar_and_north(ax, bounds, length_m=300):
+    minx, miny, maxx, maxy = bounds
+    scalebar = AnchoredSizeBar(
+        ax.transData, length_m, f"{length_m} m", loc="lower right",
+        pad=0.6, color="black", frameon=True, size_vertical=(maxy - miny) * 0.006,
+        fontproperties={"size": 9},
+    )
+    ax.add_artist(scalebar)
+    ax.annotate(
+        "N", xy=(0.05, 0.90), xytext=(0.05, 0.78), xycoords="axes fraction",
+        arrowprops=dict(facecolor="black", width=3, headwidth=10),
+        ha="center", fontsize=11, fontweight="bold",
+    )
+
+
+def detections_map():
+    """Map the raw georeferenced detections (not the segment aggregate) so
+    the CV output itself reads as a geospatial result, colored by class.
+
+    Every detection on the same photo shares that photo's single GPS point
+    (see georeference.py strategy A), so plotting true coordinates would
+    stack many markers exactly on top of each other. Points are jittered by
+    a few metres, perpendicular to the route, purely so overlapping
+    detections are visible as a spread instead of one dot -- this is a
+    display trick, not a claim about sub-image detection position.
+    """
+    csv_path = Path("outputs/detections/detections_geo.csv")
+    if not csv_path.exists():
+        return
+    metric_crs = _metric_crs()
+
+    df = pd.read_csv(csv_path).dropna(subset=["lat", "lon"])
+    pts = gpd.GeoDataFrame(
+        df, geometry=gpd.points_from_xy(df["lon"], df["lat"]), crs="EPSG:4326"
+    ).to_crs(metric_crs)
+
+    rng = np.random.default_rng(42)
+    pts["geometry"] = pts.geometry.apply(
+        lambda p: Point(p.x + rng.uniform(-4, 4), p.y + rng.uniform(-4, 4))
+    )
+
+    fig, ax = plt.subplots(figsize=(8, 9))
+    classes = sorted(pts["class_name"].unique())
+    palette = plt.get_cmap("tab10")
+    for i, cls in enumerate(classes):
+        subset = pts[pts["class_name"] == cls]
+        subset.plot(ax=ax, color=palette(i), markersize=10, alpha=0.7, label=cls, zorder=2)
+    ax.legend(loc="upper left", fontsize=8, title="Distress class", framealpha=0.9)
+
+    minx, miny, maxx, maxy = pts.total_bounds
+    pad = max(maxx - minx, maxy - miny) * 0.15
+    ax.set_xlim(minx - pad, maxx + pad)
+    ax.set_ylim(miny - pad, maxy + pad)
+
+    import contextily as ctx
+    ctx.add_basemap(ax, crs=metric_crs, source=ctx.providers.Esri.WorldGrayCanvas, zorder=1)
+    _add_scalebar_and_north(ax, pts.total_bounds)
+
+    ax.set_axis_off()
+    ax.set_title(
+        "Georeferenced detections along the survey route (jittered for visibility)",
+        fontsize=11,
+    )
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / "detections_map.png", dpi=200)
+    plt.close(fig)
+
+
+def locator_map():
+    """A city-scale inset showing where the study corridor sits within
+    Montréal -- standard cartographic practice: a detail map alone doesn't
+    tell a reader where in the world they're looking."""
+    gpkg = Path("outputs/segment_priority.gpkg")
+    if not gpkg.exists():
+        return
+    metric_crs = _metric_crs()
+    segs = gpd.read_file(gpkg, layer="segment_priority").to_crs(metric_crs)
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    centroid = segs.union_all().centroid
+    half_extent = 9000  # metres -- roughly island-of-Montréal scale
+    ax.set_xlim(centroid.x - half_extent, centroid.x + half_extent)
+    ax.set_ylim(centroid.y - half_extent, centroid.y + half_extent)
+
+    minx, miny, maxx, maxy = segs.total_bounds
+    box_pad = 700
+    ax.add_patch(plt.Rectangle(
+        (minx - box_pad, miny - box_pad), (maxx - minx) + 2 * box_pad, (maxy - miny) + 2 * box_pad,
+        fill=False, edgecolor="#c53030", linewidth=2.5, zorder=3,
+    ))
+    ax.annotate(
+        "Study corridor", xy=(centroid.x, maxy + box_pad), xytext=(centroid.x, maxy + 2200),
+        ha="center", fontsize=10, fontweight="bold", color="#c53030",
+        arrowprops=dict(facecolor="#c53030", edgecolor="#c53030", width=2, headwidth=8),
+    )
+
+    import contextily as ctx
+    ctx.add_basemap(ax, crs=metric_crs, source=ctx.providers.Esri.WorldTopoMap, zorder=1)
+
+    ax.set_axis_off()
+    ax.set_title("Where this is: Chemin de la Côte-Sainte-Catherine, Montréal", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / "locator_map.png", dpi=200)
+    plt.close(fig)
+
+
 def qgis_priority_map():
     """A publication-quality static map: segments colored by priority score,
     the DBSCAN hotspot corridor, and a real basemap for geographic context.
@@ -168,8 +280,7 @@ def qgis_priority_map():
     gpkg = Path("outputs/segment_priority.gpkg")
     if not gpkg.exists():
         return
-    with open("configs/config.yaml", encoding="utf-8") as f:
-        metric_crs = yaml.safe_load(f)["geo"]["metric_crs"]
+    metric_crs = _metric_crs()
 
     segs = gpd.read_file(gpkg, layer="segment_priority").to_crs(metric_crs)
     try:
@@ -196,19 +307,7 @@ def qgis_priority_map():
 
     import contextily as ctx
     ctx.add_basemap(ax, crs=metric_crs, source=ctx.providers.Esri.WorldGrayCanvas, zorder=1)
-
-    # Axes are in a metric CRS (UTM), so a size bar in data units is exact metres.
-    scalebar = AnchoredSizeBar(
-        ax.transData, 300, "300 m", loc="lower right",
-        pad=0.6, color="black", frameon=True, size_vertical=(maxy - miny) * 0.006,
-        fontproperties={"size": 9},
-    )
-    ax.add_artist(scalebar)
-    ax.annotate(
-        "N", xy=(0.05, 0.90), xytext=(0.05, 0.78), xycoords="axes fraction",
-        arrowprops=dict(facecolor="black", width=3, headwidth=10),
-        ha="center", fontsize=11, fontweight="bold",
-    )
+    _add_scalebar_and_north(ax, segs.total_bounds)
 
     ax.set_axis_off()
     ax.set_title(
@@ -229,6 +328,8 @@ def main():
     yolo_training_curves()
     yolo_confusion_matrix()
     qgis_priority_map()
+    detections_map()
+    locator_map()
     print(f"Figures written to {FIGURES_DIR}/")
 
 

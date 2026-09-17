@@ -118,6 +118,8 @@ ML ([`segment_model.py`](src/model/segment_model.py)).
 
 ## Data
 
+![Locator map](figures/locator_map.png)
+
 Built around an open UAV pavement-distress dataset:
 
 | Dataset | Content | Notes |
@@ -148,8 +150,8 @@ This is disclosed here instead of hidden because the whole point of the project 
 
 *(Reproduce all of this with `python -m src.reporting.make_figures` after running the pipeline
 — see [Usage](#usage). The two YOLO figures additionally need `models/baseline/results.csv`,
-downloaded once from the Colab training run since training happens off-machine. The priority map
-needs internet access once, to fetch basemap tiles.)*
+downloaded once from the Colab training run since training happens off-machine. The three map
+figures need internet access, to fetch basemap tiles.)*
 
 ### Detector
 
@@ -184,6 +186,17 @@ in the table above are the numbers that reflect real operating behavior.
 The test set is heavily imbalanced — 425 transverse-crack detections vs. 4 pothole detections —
 so the aggregate numbers above are mostly driven by the crack classes; pothole precision/recall
 individually are not statistically meaningful yet at this sample size.
+
+### Detections in space
+
+![Georeferenced detections map](figures/detections_map.png)
+
+Before aggregation, this is what the detector actually produced geographically: every detection
+from the class-distribution chart above, placed at its (simulated) survey position and colored by
+class. Cracks (orange/green/brown) dominate visually simply because they dominate the counts —
+this map is the geospatial complement to that bar chart, not new information, but seeing *where*
+detections concentrate is exactly what a maintenance planner needs before hotspot/segment logic
+ever runs.
 
 ### Hotspot detection
 
