@@ -26,6 +26,19 @@ maintenance first.
 
 ---
 
+## Main idea behind this project
+
+Infrastructure asset management runs on condition data, and condition data is expensive to
+collect at scale — someone has to physically inspect every stretch of road. This project's
+central idea is that a drone survey plus machine learning can shorten that loop: instead of a
+person rating pavement condition by eye, a trained model does the visual inspection, a
+geospatial layer turns scattered detections into a per-road-segment picture, and a second model
+extends that picture to segments not yet surveyed. The deliverable is not a detection model in
+isolation — it's the full chain from **raw imagery to a ranked list of where to intervene
+first**, which is the actual decision an asset-management team needs to make.
+
+---
+
 ## Executive summary
 
 Given ~2,440 UAV images of pavement, a YOLO detector finds and classifies six distress types
