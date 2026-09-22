@@ -374,6 +374,9 @@ python -m src.geo.export_qgis --config configs/config.yaml
 
 # 8. Regenerate the README figures from the outputs above
 python -m src.reporting.make_figures
+
+# 9. Load segments, detections, and scores into a queryable SQLite database
+python -m src.db.load_to_sqlite --config configs/config.yaml
 ```
 
 ---
@@ -396,11 +399,13 @@ pavement-distress-drone/
 │       ├── generate_synthetic_segments.py# real street split into synthetic segments (demo)
 │       ├── aggregate_to_segments.py      # DBSCAN hotspots + spatial join + priority score
 │       └── export_qgis.py                # write GeoPackage for QGIS
+│   └── db/load_to_sqlite.py          # load outputs/ into a queryable SQLite database
+├── sql/schema.sql                    # the 3-table schema (segments, detections, segment_scores)
 ├── notebooks/                        # exploration & demo
 ├── figures/                          # committed, reproducible README figures
 ├── data/                             # datasets (git-ignored)
 ├── models/                           # trained weights (git-ignored)
-└── outputs/                          # detections, hotspots, scored segments (git-ignored)
+└── outputs/                          # detections, hotspots, scored segments, pavement.db (git-ignored)
 ```
 
 ---
@@ -417,7 +422,7 @@ pavement-distress-drone/
 - [ ] Orthomosaic support (GeoTIFF affine transform)
 - [ ] Real road-network segments (OSM extract) instead of the synthetic 8-segment demo
 - [ ] Airflow DAG orchestrating the 7 pipeline steps
-- [ ] Detections & segment scores persisted to SQLite/Azure SQL
+- [x] Detections & segment scores persisted to SQLite (`sql/schema.sql`, `src/db/load_to_sqlite.py`)
 - [ ] Short demo notebook
 - [ ] (Stretch) Streamlit demo for drag-and-drop inference
 

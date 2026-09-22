@@ -100,6 +100,16 @@ def main(config_path: str):
         how="left", max_distance=geo["snap_distance_m"], distance_col="dist_m",
     )
 
+    # This is the one place the detection -> segment mapping exists; save it
+    # per-detection (not just the aggregate) so the SQL layer can load it.
+    # seg_id is left NaN for detections beyond snap_distance_m -- a real
+    # detection with no segment attributed, not a row to silently drop.
+    det_out = Path(cfg["inference"]["out_dir"]) / "detections_segmented.csv"
+    joined[["image", "class_name", "conf", "xmin", "ymin", "xmax", "ymax", "lat", "lon", "seg_id"]].to_csv(
+        det_out, index=False
+    )
+    print(f"Wrote {len(joined)} detections with segment assignment -> {det_out}")
+
     weights = geo["severity_weights"]
     joined["weight"] = joined["class_name"].map(weights).fillna(1)
     joined["contribution"] = joined["weight"] * joined["conf"]

@@ -67,6 +67,11 @@ geo:
     repair: 1
   out_layer: outputs/segment_priority.gpkg
 
+# ---- SQL persistence ------------------------------------------
+db:
+  path: outputs/pavement.db
+  schema_path: sql/schema.sql
+
 # ---- Segment condition model (scikit-learn, tabular) ---------
 model:
   # Synthetic training data: no real large-scale segment survey is available,
