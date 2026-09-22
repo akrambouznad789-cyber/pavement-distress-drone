@@ -43,32 +43,34 @@ def detection_class_distribution():
 
 
 def segment_condition_predicted_vs_actual():
-    """Three-way comparison on the 8 drone-surveyed segments: our drone-based
-    priority score, the tabular model's prediction, and the City of
-    Montreal's real, measured PCI for that same stretch of road. The first
-    two share a scale (severity sum, higher = worse); real PCI is a
-    different, bounded 0-100 condition scale (higher = better) -- so it gets
-    its own panel rather than being forced onto the same axis.
+    """Three-way comparison on the demo segments that matched a real City of
+    Montreal PCI segment: our drone-based priority score, the tabular
+    model's prediction, and the city's real, measured PCI for that same
+    stretch of road. The first two share a scale (severity sum, higher =
+    worse); real PCI is a different, bounded 0-100 condition scale (higher =
+    better) -- so it gets its own panel. Sorted by drone score (descending)
+    so the two panels stay readable with more than a handful of segments.
     """
-    df = pd.read_csv("outputs/segment_model/surveyed_vs_predicted.csv").sort_values("seg_id")
+    df = pd.read_csv("outputs/segment_model/surveyed_vs_predicted.csv")
+    df = df.sort_values("drone_priority_score", ascending=False).reset_index(drop=True)
     x = range(len(df))
     width = 0.35
 
-    fig, (ax_severity, ax_pci) = plt.subplots(1, 2, figsize=(11, 4))
+    fig, (ax_severity, ax_pci) = plt.subplots(1, 2, figsize=(13, 4.5))
 
     ax_severity.bar([i - width / 2 for i in x], df["drone_priority_score"], width,
                      label="Drone-based (detections)", color="#c53030")
     ax_severity.bar([i + width / 2 for i in x], df["predicted_score"], width,
                      label="Tabular model prediction", color="#2b6cb0")
     ax_severity.set_xticks(list(x))
-    ax_severity.set_xticklabels([f"seg {i}" for i in df["seg_id"]])
+    ax_severity.set_xticklabels([f"seg {i}" for i in df["seg_id"]], rotation=90, fontsize=8)
     ax_severity.set_ylabel("Priority score (higher = worse)")
     ax_severity.set_title("Severity score: drone vs. model")
     ax_severity.legend(fontsize=8)
 
     ax_pci.bar(list(x), df["real_indice_pci"], color="#38a169")
     ax_pci.set_xticks(list(x))
-    ax_pci.set_xticklabels([f"seg {i}" for i in df["seg_id"]])
+    ax_pci.set_xticklabels([f"seg {i}" for i in df["seg_id"]], rotation=90, fontsize=8)
     ax_pci.set_ylabel("Real PCI (higher = better)")
     ax_pci.set_ylim(0, 100)
     ax_pci.set_title("City of Montréal's real PCI (ground truth)")
@@ -235,7 +237,7 @@ def detections_map():
 
     ax.set_axis_off()
     ax.set_title(
-        "Georeferenced detections along the survey route (jittered for visibility)",
+        "Georeferenced detections across the surveyed street network (jittered for visibility)",
         fontsize=11,
     )
     fig.tight_layout()
@@ -244,7 +246,7 @@ def detections_map():
 
 
 def locator_map():
-    """A city-scale inset showing where the study corridor sits within
+    """A city-scale inset showing where the study neighbourhood sits within
     Montréal -- standard cartographic practice: a detail map alone doesn't
     tell a reader where in the world they're looking."""
     gpkg = Path("outputs/segment_priority.gpkg")
@@ -266,7 +268,7 @@ def locator_map():
         fill=False, edgecolor="#c53030", linewidth=2.5, zorder=3,
     ))
     ax.annotate(
-        "Study corridor", xy=(centroid.x, maxy + box_pad), xytext=(centroid.x, maxy + 2200),
+        "Study neighbourhood", xy=(centroid.x, maxy + box_pad), xytext=(centroid.x, maxy + 2200),
         ha="center", fontsize=10, fontweight="bold", color="#c53030",
         arrowprops=dict(facecolor="#c53030", edgecolor="#c53030", width=2, headwidth=8),
     )
@@ -275,7 +277,7 @@ def locator_map():
     ctx.add_basemap(ax, crs=metric_crs, source=ctx.providers.Esri.WorldTopoMap, zorder=1)
 
     ax.set_axis_off()
-    ax.set_title("Where this is: Chemin de la Côte-Sainte-Catherine, Montréal", fontsize=11)
+    ax.set_title("Where this is: near Polytechnique Montréal", fontsize=11)
     fig.tight_layout()
     fig.savefig(FIGURES_DIR / "locator_map.png", dpi=200)
     plt.close(fig)
@@ -328,9 +330,9 @@ def qgis_priority_map():
 
     ax.set_axis_off()
     ax.set_title(
-        "Pavement maintenance priority — Chemin de la Côte-Sainte-Catherine, Montréal\n"
-        "(orange band = DBSCAN distress hotspot; synthetic demo, see README)",
-        fontsize=11,
+        "Pavement maintenance priority — near Polytechnique Montréal\n"
+        "(orange = DBSCAN hotspot; simulated survey, real streets — see README)",
+        fontsize=10,
     )
     fig.tight_layout()
     fig.savefig(FIGURES_DIR / "qgis_priority_map.png", dpi=200)

@@ -1,10 +1,12 @@
 -- Reference table: the road segments themselves. Attributes change rarely.
 -- longueur_m/arrondissement/indice_iri are matched in from the City of
 -- Montreal's real segments that overlap this one (see segment_model.py) --
--- real, measured values, not invented.
+-- real, measured values, not invented. NULL means no PCI-surveyed Montreal
+-- segment was found nearby (real coverage gap, not an error) -- happens for
+-- a handful of the 32 demo segments.
 CREATE TABLE IF NOT EXISTS segments (
     seg_id           INTEGER PRIMARY KEY,
-    arrondissement   TEXT NOT NULL,
+    arrondissement   TEXT,
     longueur_m       REAL,
     indice_iri       REAL,
     geometry_wkt     TEXT  -- segment shape, as WKT text (SQLite has no native geometry type)

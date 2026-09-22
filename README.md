@@ -19,8 +19,9 @@ maintenance first.
 > that job faster: an AI trained to recognize cracks and potholes automatically spots the damage
 > in the photos, places it on a real map, groups nearby damage into "problem zones," then
 > calculates a **priority score** to know which stretch of road to fix first. For sections the
-> drone hasn't surveyed yet, a second model uses simple information (road type, traffic, age) to
-> still estimate their likely condition. The result is a map that shows, street by street, where
+> drone hasn't surveyed yet, a second model uses simple information (street length, borough,
+> road roughness) to still estimate their likely condition. The result is a map that shows,
+> street by street, where
 > to step in first — exactly the kind of tool a city would use to plan road maintenance on a
 > limited budget.
 
@@ -49,10 +50,12 @@ survey, then estimates a segment's real PCI from attributes available city-wide 
 borough, roughness) alone — useful for segments a drone hasn't surveyed yet. Everything ends up
 in a GeoPackage that opens directly in QGIS with graduated priority symbology.
 
-No real GPS-tagged flight was available for this project, so the **survey GPS coordinates and
-the 8 segment boundaries are an honestly-labeled synthetic demo** built on a real Montréal
-street. Everything downstream of that — the detector, the condition model, and its training and
-ground-truth data — is real. See [Limitations](#limitations--honest-caveats) for exactly where
+No real GPS-tagged flight was available for this project, so the **survey GPS coordinates are an
+honestly-labeled synthetic demo** — simulated across a real street network (32 segments, 15
+real streets in a Montréal neighbourhood near Polytechnique, fetched from OpenStreetMap).
+Everything downstream of that — the segment boundaries themselves, the detector, the condition
+model, and its training and ground-truth data — is real. See
+[Limitations](#limitations--honest-caveats) for exactly where
 the line is drawn.
 
 ---
@@ -139,7 +142,7 @@ pavement condition survey — ~16,000 segments city-wide, with a real Pavement C
 `Pipeline`. Random Forest and Gradient Boosting are compared with 5-fold cross-validation, the
 winner is tuned with `GridSearchCV`, and feature importances are extracted — the standard
 "compare → tune → explain" workflow for tabular ML
-([`segment_model.py`](src/model/segment_model.py)). The 8 drone-surveyed demo segments are then
+([`segment_model.py`](src/model/segment_model.py)). The 32 drone-surveyed demo segments are then
 spatially matched to the real Montréal segments that overlap them, so they inherit real
 attributes *and* a real ground-truth PCI to compare against — see [Results](#results).
 
@@ -167,12 +170,11 @@ pothole, repair. Datasets are **not** committed — see [`data/README.md`](data/
 |---|---|
 | Detector training images & labels | Real (UAV-PDD2023) |
 | Detector inference on held-out test images | Real model output |
-| Street geometry | **Real** — [`fetch_osm_route.py`](src/geo/fetch_osm_route.py) pulls the actual shape of Chemin de la Côte-Sainte-Catherine, Montréal (~1.9 km, 28 OpenStreetMap way segments stitched into one line) via the Overpass API. |
-| GPS coordinates on the "survey" images | **Synthetic** — UAV-PDD2023 images carry no GPS EXIF (they're research crops, not flight photos). [`generate_synthetic_survey.py`](src/data/generate_synthetic_survey.py) simulates a drone flying along that real street's curve and stamps each test image with a point spaced by real distance along it — a fake flight, over a real road shape. |
-| Road segment *boundaries* | **Synthetic, real shape** — no municipal road-segment layer was used for the drone demo itself, so [`generate_synthetic_segments.py`](src/geo/generate_synthetic_segments.py) splits that same real street into 8 equal-length segments. |
-| Road segment *attributes* (length, borough, roughness) | **Real** — [`segment_model.py`](src/model/segment_model.py) spatially matches each of the 8 demo segments to the real City of Montréal segments that overlap it and inherits their measured values. |
+| Street network & segment boundaries | **Real** — [`fetch_osm_network.py`](src/geo/fetch_osm_network.py) pulls every real drivable street (32 segments, 15 named streets) in a Montréal neighbourhood near Polytechnique from OpenStreetMap. Each segment is a real OSM way, the same block-to-block granularity the City of Montréal uses for its own PCI survey — not an arbitrary division. |
+| GPS coordinates on the "survey" images | **Synthetic** — UAV-PDD2023 images carry no GPS EXIF (they're research crops, not flight photos). [`generate_synthetic_survey.py`](src/data/generate_synthetic_survey.py) assigns each test image a random point on a random real segment (weighted by segment length) — a fake flight, over real streets. |
+| Road segment *attributes* (length, borough, roughness) | **Real** — [`segment_model.py`](src/model/segment_model.py) spatially matches each of the 32 demo segments to the real City of Montréal segments that overlap it and inherits their measured values. |
 | Segment condition model's training data | **Real** — [`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py) downloads ~16,000 real, measured segments (Pavement Condition Index) from the City of Montréal's open data portal. No synthetic/formula-based data remains in this project. |
-| Ground truth for the 8 demo segments | **Real** — the City of Montréal's own PCI rating for that exact stretch of Chemin de la Côte-Sainte-Catherine, used as an independent check on both the drone-based score and the model's prediction. |
+| Ground truth for the 32 demo segments | **Real** — the City of Montréal's own PCI rating for those exact streets, used as an independent check on both the drone-based score and the model's prediction. |
 
 This is disclosed here instead of hidden because the whole point of the project is the
 **pipeline architecture**, not a claim of field-validated results — see
@@ -234,12 +236,12 @@ ever runs.
 
 ### Hotspot detection
 
-DBSCAN (`eps=20m`, `min_samples=3`) found **1 hotspot** covering nearly the entire synthetic
-route. That's expected, not a bug: the simulated drone images are spaced a few metres apart
-along one continuous line, so almost every point has ≥3 neighbours within 20 m, and DBSCAN
-correctly merges them into a single connected region (a known "chaining" behavior of
-density-based clustering on near-uniform linear data). A real, non-uniform survey — several
-distinct streets, gaps between flights — would produce several separate hotspots instead of one.
+DBSCAN (`eps=20m`, `min_samples=3`) found **84 distinct hotspots** spread across the
+neighbourhood's 15 streets. This is a direct improvement from an earlier version of this demo
+that surveyed a single street: with detections spread across many separate real streets instead
+of one continuous line, DBSCAN's "chaining" behavior (merging everything into one blob on
+near-uniform linear data) no longer dominates — the clustering now does the job it's actually
+meant to do, finding real, spatially distinct concentrations of damage.
 
 ### Segment condition model
 
@@ -265,36 +267,41 @@ credible result for this feature set, not a broken model.
 `indice_iri` (roughness) dominates, which makes physical sense — it's the closest available
 proxy for surface condition; individual boroughs barely move the prediction on their own.
 
-### Three ways to score the same 8 segments
+### Three ways to score the same segments
 
 ![Predicted vs. actual priority score](figures/segment_condition_predicted_vs_actual.png)
 
-Each of the 8 drone-surveyed segments now has three independent numbers: our drone-based
-`priority_score` (sum of weighted detections — higher is worse), the tabular model's
-`predicted_score` (same scale), and the City of Montréal's real, measured PCI for that exact
-stretch (0–100, higher is *better* — a different, bounded scale, so it gets its own panel above
-rather than being forced onto the same axis).
+26 of the 32 demo segments matched a real City of Montréal PCI segment nearby (the other 6 fall
+outside the city's surveyed network — a real coverage gap, not an error). Each of those 26 now
+has three independent numbers: our drone-based `priority_score` (sum of weighted detections —
+higher is worse), the tabular model's `predicted_score` (same scale), and the city's real,
+measured PCI (0–100, higher is *better* — a different, bounded scale, so it gets its own panel).
 
-They don't fully agree, and the most interesting case is **segment 6**: it has the *worst* real
-PCI of all 8 (31, "très mauvais") but only a middling drone-based priority score. Our proxy
-metric — counting and weighting visible cracks/potholes from images — and the city's official
-PCI — which also factors in rutting and ride roughness — are measuring related but different
-things. That's a legitimate, reportable finding, not noise: it shows exactly where a
-vision-based proxy and an official condition index can diverge, which is useful information for
-anyone deciding how much to trust drone-based scoring on its own.
+They don't fully agree, and the clearest case is **segment 24**: the drone found *zero*
+detections there (nothing to flag), yet its real PCI is 18.9 — "très mauvais," one of the worst
+in the whole neighbourhood. Contrast that with **segment 29**, also zero detections, but a real
+PCI of 70.1 — genuinely good condition. Same drone-based signal (nothing detected), opposite
+ground truth. That's the honest limit of a crack/pothole detector as a condition proxy: it
+scores what's visible in a photo, while the city's PCI also captures rutting, patching, and ride
+roughness that a photo of the surface alone won't show. Reporting this divergence is more useful
+than hiding it — it tells a reader exactly how much to trust drone-based scoring on its own.
 
 ### Top segments by priority
 
+Out of 32 real street segments in the neighbourhood:
+
 | Segment | Priority score | Detections | Dominant issue |
 |---|---|---|---|
-| 3 | 206.9 | 198 | alligator_crack |
-| 0 | 205.6 | 211 | alligator_crack |
-| 5 | 176.5 | 155 | alligator_crack |
-| 6 | 138.0 | 116 | alligator_crack |
-| 2 | 129.1 | 116 | pothole |
-| 1 | 115.7 | 88 | pothole |
-| 7 | 101.5 | 98 | pothole |
-| 4 | 84.6 | 65 | transverse_crack |
+| 12 | 99.0 | 85 | alligator_crack |
+| 31 | 77.6 | 73 | pothole |
+| 21 | 70.1 | 80 | alligator_crack |
+| 27 | 67.8 | 66 | transverse_crack |
+| 2 | 64.6 | 50 | alligator_crack |
+| 14 | 63.8 | 57 | pothole |
+| 11 | 63.2 | 64 | alligator_crack |
+| 7 | 63.2 | 48 | transverse_crack |
+| 1 | 60.1 | 52 | alligator_crack |
+| 0 | 55.3 | 42 | alligator_crack |
 
 ### Priority map
 
@@ -310,25 +317,26 @@ QGIS to explore it interactively (pan, zoom, inspect attributes per segment).
 
 ## Limitations & honest caveats
 
-- **Simulated GPS and synthetic segment boundaries.** GPS coordinates on the survey images and
-  the 8 equal-length segment boundaries are simulated, not field-collected — see [Data](#data).
-  The detector is trained on real imagery/labels, and the condition model on real, measured PCI
-  data (see below).
+- **Simulated GPS only.** The survey GPS coordinates are simulated (a random point on a random
+  real segment, weighted by length) — no real flight happened. Everything else — the street
+  network and segment boundaries, the detector, and the condition model's training and
+  ground-truth data — is real; see [Data](#data).
 - **Two different scoring systems, not directly comparable on one axis.** The drone-based
   `priority_score` and the model's `predicted_score` share a scale; the city's real PCI is a
-  different, bounded 0–100 condition index. As shown above, they don't fully agree (segment 6 is
-  the clearest case) — that's a real, reportable finding about where a vision-based proxy and an
-  official index diverge, not a bug to hide.
+  different, bounded 0–100 condition index. As shown above, they don't fully agree (segment 24
+  is the clearest case) — that's a real, reportable finding about where a vision-based proxy and
+  an official index diverge, not a bug to hide.
 - **Modest R² (0.27) on the condition model.** Honest for the feature set used (segment length,
   borough, roughness) — real PCI also depends on material and maintenance history, which aren't
   in this data. A higher R² would need richer real features, not a different algorithm.
 - **Small, imbalanced test set** for the detector (e.g. only 4 pothole detections) — per-class
   metrics for rare classes are not statistically reliable yet.
-- **DBSCAN chaining on near-uniform spacing.** With detections spaced evenly along a single
-  line, the algorithm tends to merge everything into one hotspot rather than several. Realistic,
-  irregular flight coverage would better showcase this step.
-- **Tiny synthetic road network** (8 segments, one street) — enough to demonstrate the spatial
-  join and aggregation logic, not representative of a real municipal network's scale.
+- **6 of 32 segments have no real PCI match** — they fall outside the City of Montréal's
+  surveyed network within `match_distance_m`. Left as `NULL` in the database rather than
+  guessed.
+- **Neighbourhood-scale network** (32 segments, 15 streets) — big enough to show a real DBSCAN
+  hotspot pattern (84 hotspots) instead of one degenerate case, but still small next to a full
+  municipal network.
 
 ---
 
@@ -374,10 +382,9 @@ any CPU.
 
 ```bash
 # 0. Demo data setup -- only needed to reproduce the synthetic demo; skip
-#    these three if you have real GPS-tagged imagery and a real segments layer.
-python -m src.geo.fetch_osm_route                                  # -> data/road_route.geojson
+#    these two if you have real GPS-tagged imagery and a real segments layer.
+python -m src.geo.fetch_osm_network                                # -> data/road_segments.gpkg
 python -m src.data.generate_synthetic_survey --config configs/config.yaml
-python -m src.geo.generate_synthetic_segments --config configs/config.yaml
 
 # 1. Convert dataset annotations to YOLO format
 python -m src.data.prepare_dataset --config configs/config.yaml
@@ -426,9 +433,8 @@ pavement-distress-drone/
 │   ├── model/segment_model.py        # scikit-learn tabular condition model
 │   ├── reporting/make_figures.py     # regenerate README figures from outputs/
 │   └── geo/
-│       ├── fetch_osm_route.py            # pull a real street's shape from OpenStreetMap
+│       ├── fetch_osm_network.py          # pull a real street network (segments) from OpenStreetMap
 │       ├── georeference.py               # pixel bbox -> geographic coordinates
-│       ├── generate_synthetic_segments.py# real street split into synthetic segments (demo)
 │       ├── aggregate_to_segments.py      # DBSCAN hotspots + spatial join + priority score
 │       └── export_qgis.py                # write GeoPackage for QGIS
 │   └── db/load_to_sqlite.py          # load outputs/ into a queryable SQLite database
