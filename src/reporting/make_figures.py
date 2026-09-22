@@ -43,20 +43,37 @@ def detection_class_distribution():
 
 
 def segment_condition_predicted_vs_actual():
-    """Model prediction vs the real detection-based score, on the 8 drone-surveyed
-    segments -- the honest check of the 'estimate condition with no imagery' claim."""
+    """Three-way comparison on the 8 drone-surveyed segments: our drone-based
+    priority score, the tabular model's prediction, and the City of
+    Montreal's real, measured PCI for that same stretch of road. The first
+    two share a scale (severity sum, higher = worse); real PCI is a
+    different, bounded 0-100 condition scale (higher = better) -- so it gets
+    its own panel rather than being forced onto the same axis.
+    """
     df = pd.read_csv("outputs/segment_model/surveyed_vs_predicted.csv").sort_values("seg_id")
-
     x = range(len(df))
     width = 0.35
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.bar([i - width / 2 for i in x], df["actual_score"], width, label="Actual (from detections)", color="#c53030")
-    ax.bar([i + width / 2 for i in x], df["predicted_score"], width, label="Predicted (tabular model)", color="#2b6cb0")
-    ax.set_xticks(list(x))
-    ax.set_xticklabels([f"seg {i}" for i in df["seg_id"]])
-    ax.set_ylabel("Priority score")
-    ax.set_title("Segment condition model: predicted vs. actual (surveyed segments)")
-    ax.legend()
+
+    fig, (ax_severity, ax_pci) = plt.subplots(1, 2, figsize=(11, 4))
+
+    ax_severity.bar([i - width / 2 for i in x], df["drone_priority_score"], width,
+                     label="Drone-based (detections)", color="#c53030")
+    ax_severity.bar([i + width / 2 for i in x], df["predicted_score"], width,
+                     label="Tabular model prediction", color="#2b6cb0")
+    ax_severity.set_xticks(list(x))
+    ax_severity.set_xticklabels([f"seg {i}" for i in df["seg_id"]])
+    ax_severity.set_ylabel("Priority score (higher = worse)")
+    ax_severity.set_title("Severity score: drone vs. model")
+    ax_severity.legend(fontsize=8)
+
+    ax_pci.bar(list(x), df["real_indice_pci"], color="#38a169")
+    ax_pci.set_xticks(list(x))
+    ax_pci.set_xticklabels([f"seg {i}" for i in df["seg_id"]])
+    ax_pci.set_ylabel("Real PCI (higher = better)")
+    ax_pci.set_ylim(0, 100)
+    ax_pci.set_title("City of Montréal's real PCI (ground truth)")
+
+    fig.suptitle("Segment condition: proxy scores vs. the city's real measurement", fontweight="bold")
     fig.tight_layout()
     fig.savefig(FIGURES_DIR / "segment_condition_predicted_vs_actual.png")
     plt.close(fig)

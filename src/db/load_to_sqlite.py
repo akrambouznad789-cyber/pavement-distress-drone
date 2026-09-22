@@ -29,20 +29,18 @@ def load_config(path: str) -> dict:
 
 
 def build_segments(cfg: dict) -> pd.DataFrame:
-    """Geometry comes from road_segments.gpkg (seg_id + shape only); the
-    attributes (road_class, traffic, age, lanes) live in
-    surveyed_vs_predicted.csv, the only file that has both for the 8 real
-    segments. Join them on seg_id.
+    """Geometry comes from road_segments.gpkg (seg_id + shape only); the real
+    attributes (arrondissement, length, roughness) live in
+    surveyed_vs_predicted.csv -- matched in from the City of Montreal's real
+    segments in segment_model.py. Join them on seg_id.
     """
     geom = gpd.read_file(cfg["geo"]["segments_path"])
     attrs = pd.read_csv(Path(cfg["model"]["out_dir"]) / "surveyed_vs_predicted.csv")
-    attrs = attrs[["seg_id", "road_class", "traffic_aadt", "pavement_age_years", "num_lanes"]]
+    attrs = attrs[["seg_id", "arrondissement", "longueur_m", "indice_iri"]]
 
     segments = geom.merge(attrs, on="seg_id", how="left")
     segments["geometry_wkt"] = segments["geometry"].apply(lambda g: g.wkt)
-    return segments[
-        ["seg_id", "road_class", "traffic_aadt", "pavement_age_years", "num_lanes", "geometry_wkt"]
-    ]
+    return segments[["seg_id", "arrondissement", "longueur_m", "indice_iri", "geometry_wkt"]]
 
 
 def build_detections(cfg: dict) -> pd.DataFrame:
@@ -61,9 +59,11 @@ def build_segment_scores(cfg: dict) -> pd.DataFrame:
     predicted = pd.read_csv(Path(cfg["model"]["out_dir"]) / "surveyed_vs_predicted.csv")
 
     scores = scored[["seg_id", "n_detections", "worst_class", "priority_score", "priority_rank"]].merge(
-        predicted[["seg_id", "predicted_score"]], on="seg_id", how="left"
+        predicted[["seg_id", "predicted_score", "real_indice_pci"]], on="seg_id", how="left"
     )
-    return scores[["seg_id", "n_detections", "worst_class", "priority_score", "predicted_score", "priority_rank"]]
+    return scores[
+        ["seg_id", "n_detections", "worst_class", "priority_score", "predicted_score", "real_indice_pci", "priority_rank"]
+    ]
 
 
 def main(config_path: str):
@@ -95,14 +95,14 @@ def main(config_path: str):
         print(f"  detections      {len(detections)} rows")
         print(f"  segment_scores  {len(segment_scores)} rows")
 
-        print("\nSanity check -- top 3 segments by priority, straight from SQL:")
+        print("\nSanity check -- top 3 segments by drone-based priority, straight from SQL:")
         top3 = conn.execute(
-            "SELECT seg_id, road_class, priority_score, predicted_score "
+            "SELECT seg_id, arrondissement, priority_score, real_indice_pci "
             "FROM segments NATURAL JOIN segment_scores "
             "ORDER BY priority_score DESC LIMIT 3"
         ).fetchall()
         for row in top3:
-            print(f"  seg_id={row[0]}  {row[1]:<11}  priority={row[2]:.1f}  predicted={row[3]:.1f}")
+            print(f"  seg_id={row[0]}  {row[1]:<38}  priority={row[2]:.1f}  real_pci={row[3]:.1f}")
     finally:
         conn.close()
 

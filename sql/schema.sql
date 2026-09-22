@@ -1,11 +1,13 @@
 -- Reference table: the road segments themselves. Attributes change rarely.
+-- longueur_m/arrondissement/indice_iri are matched in from the City of
+-- Montreal's real segments that overlap this one (see segment_model.py) --
+-- real, measured values, not invented.
 CREATE TABLE IF NOT EXISTS segments (
-    seg_id              INTEGER PRIMARY KEY,
-    road_class          TEXT NOT NULL,
-    traffic_aadt        REAL,
-    pavement_age_years  REAL,
-    num_lanes           INTEGER,
-    geometry_wkt        TEXT  -- segment shape, as WKT text (SQLite has no native geometry type)
+    seg_id           INTEGER PRIMARY KEY,
+    arrondissement   TEXT NOT NULL,
+    longueur_m       REAL,
+    indice_iri       REAL,
+    geometry_wkt     TEXT  -- segment shape, as WKT text (SQLite has no native geometry type)
 );
 
 -- Fact table: one row per detected distress instance. Grows with every drone survey.
@@ -26,7 +28,8 @@ CREATE TABLE IF NOT EXISTS segment_scores (
     seg_id           INTEGER PRIMARY KEY REFERENCES segments(seg_id),
     n_detections     INTEGER,
     worst_class      TEXT,
-    priority_score   REAL,  -- computed from real detections
+    priority_score   REAL,  -- computed from real drone detections
     predicted_score  REAL,  -- estimated by the scikit-learn condition model
+    real_indice_pci  REAL,  -- the City of Montreal's own measured PCI for this stretch
     priority_rank    INTEGER
 );

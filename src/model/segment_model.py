@@ -1,23 +1,23 @@
 """
-Train a scikit-learn model that predicts a road segment's condition
-(priority_score) from tabular attributes (road class, traffic, pavement age),
-so segments the drone never surveyed can still get an estimated priority.
+Train a scikit-learn model that predicts a road segment's real Pavement
+Condition Index (PCI) from attributes available city-wide (segment length,
+borough, roughness), so segments the drone never surveyed can still get an
+estimated condition.
 
 Steps:
-  1. Load the synthetic segment-features training set (see
-     src.model.generate_synthetic_segment_features).
-  2. Pipeline: ColumnTransformer (one-hot road_class, scale numeric features)
-     -> regressor.
+  1. Load the real Montreal PCI segment table (see
+     src.model.fetch_montreal_pci_data) -- ~16,000 real, measured segments.
+  2. Pipeline: ColumnTransformer (one-hot arrondissement, scale numeric
+     features) -> regressor.
   3. Compare RandomForestRegressor vs GradientBoostingRegressor with
      cross-validation, then tune the winner with GridSearchCV.
   4. Evaluate the tuned model on a held-out test split (MAE / RMSE / R2) and
      plot feature importance.
-  5. Apply the trained model to the 8 real drone-surveyed segments (assigning
-     them synthetic attributes, since we have no real road registry) and
-     compare its prediction to the actual priority_score computed from real
-     detections in src.geo.aggregate_to_segments -- this is the "estimate
-     condition on segments the drone never flew over" workflow, checked
-     against segments where we *do* have ground truth.
+  5. Spatially match our 8 drone-surveyed demo segments to the real Montreal
+     segments that overlap them (same street, real geometry), so they inherit
+     real attributes -- then apply the trained model and compare three
+     values: our drone-based priority_score, the model's predicted_score,
+     and the city's own real indice_pci for that stretch of road.
 """
 from __future__ import annotations
 
@@ -37,9 +37,9 @@ from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_sp
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-NUMERIC_FEATURES = ["traffic_aadt", "pavement_age_years", "num_lanes"]
-CATEGORICAL_FEATURES = ["road_class"]
-TARGET = "priority_score_true"
+NUMERIC_FEATURES = ["longueur_m", "indice_iri"]
+CATEGORICAL_FEATURES = ["arrondissement"]
+TARGET = "indice_pci"
 
 
 def load_config(path: str) -> dict:
@@ -56,25 +56,40 @@ def build_preprocessor() -> ColumnTransformer:
     )
 
 
-def synthetic_features_for_surveyed_segments(seg_ids, seed: int) -> pd.DataFrame:
-    """Assign plausible road attributes to the real surveyed segments (no real
-    road registry exists), so the trained model can be applied to them."""
-    rng = np.random.default_rng(seed)
-    n = len(seg_ids)
-    road_classes = rng.choice(["residential", "collector", "arterial"], size=n, p=[0.5, 0.3, 0.2])
-    base_traffic = {"residential": 2000, "collector": 8000, "arterial": 20000}
-    traffic_aadt = np.array([base_traffic[c] for c in road_classes]) * rng.uniform(0.6, 1.4, size=n)
-    pavement_age_years = rng.uniform(0, 30, size=n)
-    num_lanes = np.array([{"residential": 2, "collector": 2, "arterial": 4}[c] for c in road_classes])
-    return pd.DataFrame(
-        {
-            "seg_id": seg_ids,
-            "road_class": road_classes,
-            "traffic_aadt": traffic_aadt.round(0),
-            "pavement_age_years": pavement_age_years.round(1),
-            "num_lanes": num_lanes,
-        }
-    )
+def real_features_for_surveyed_segments(
+    segments_path: str, montreal_pci_path: str, metric_crs: str, match_distance_m: float
+) -> gpd.GeoDataFrame:
+    """Match each of our 8 demo segments to the real Montreal segments whose
+    geometry falls within `match_distance_m` of it (there are several real,
+    short block-to-block segments per demo segment), and aggregate their real
+    attributes -- length-weighted for PCI/IRI, most common borough. This
+    replaces inventing attributes: it's the same street, so the real segments
+    directly under our demo segments are the honest ground truth.
+    """
+    demo = gpd.read_file(segments_path).to_crs(metric_crs)
+    real = gpd.read_file(montreal_pci_path).to_crs(metric_crs)
+
+    demo_buffered = demo.copy()
+    demo_buffered["geometry"] = demo.geometry.buffer(match_distance_m)
+
+    joined = gpd.sjoin(real, demo_buffered[["seg_id", "geometry"]], how="inner", predicate="intersects")
+
+    def weighted_avg(g: pd.DataFrame, col: str) -> float:
+        return float(np.average(g[col], weights=g["longueur_m"]))
+
+    rows = []
+    for seg_id, g in joined.groupby("seg_id"):
+        rows.append(
+            {
+                "seg_id": seg_id,
+                "longueur_m": weighted_avg(g, "longueur_m"),
+                "indice_iri": weighted_avg(g, "indice_iri"),
+                "arrondissement": g["arrondissement"].mode().iat[0],
+                "real_indice_pci": weighted_avg(g, "indice_pci"),
+                "n_real_segments_matched": len(g),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def main(config_path: str):
@@ -84,7 +99,7 @@ def main(config_path: str):
     out_dir = Path(mcfg["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(mcfg["features_path"])
+    df = gpd.read_file(mcfg["features_path"])
     X = df[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
     y = df[TARGET]
     X_train, X_test, y_train, y_test = train_test_split(
@@ -133,32 +148,41 @@ def main(config_path: str):
         prep.named_transformers_["cat"].get_feature_names_out(CATEGORICAL_FEATURES)
     )
     importances = best_model.named_steps["reg"].feature_importances_
-    order = np.argsort(importances)[::-1]
+    order = np.argsort(importances)[::-1][:15]  # city-wide boroughs = many one-hot columns; show top 15
 
-    plt.figure(figsize=(6, 4))
-    plt.barh([feature_names[i] for i in order], importances[order])
+    plt.figure(figsize=(7, 5))
+    plt.barh([feature_names[i] for i in order][::-1], importances[order][::-1])
     plt.xlabel("Feature importance")
-    plt.title(f"Segment condition model ({best_name})")
+    plt.title(f"Segment condition model ({best_name.replace('_', ' ')})", fontsize=10)
     plt.tight_layout()
     plt.savefig(out_dir / "feature_importance.png")
     print(f"Feature importance plot -> {out_dir / 'feature_importance.png'}")
 
-    # Apply to the real drone-surveyed segments and compare to actual scores.
+    # Match our 8 demo segments to real Montreal segments, apply the model,
+    # and compare against both our drone-based score and the city's real PCI.
     scored_path = Path("outputs") / "segments_scored.gpkg"
     if scored_path.exists():
-        surveyed = gpd.read_file(scored_path)
-        surveyed_features = synthetic_features_for_surveyed_segments(surveyed["seg_id"], seed=seed + 1)
-        surveyed_features["predicted_score"] = best_model.predict(
-            surveyed_features[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+        geo = cfg["geo"]
+        real_matched = real_features_for_surveyed_segments(
+            geo["segments_path"], mcfg["features_path"], geo["metric_crs"], mcfg["match_distance_m"]
         )
-        comparison = surveyed_features.merge(
-            surveyed[["seg_id", "priority_score"]].rename(columns={"priority_score": "actual_score"}),
+        real_matched["predicted_score"] = best_model.predict(
+            real_matched[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+        )
+
+        surveyed = gpd.read_file(scored_path)
+        comparison = real_matched.merge(
+            surveyed[["seg_id", "priority_score"]].rename(columns={"priority_score": "drone_priority_score"}),
             on="seg_id",
         )
         comparison_path = out_dir / "surveyed_vs_predicted.csv"
         comparison.to_csv(comparison_path, index=False)
-        print(f"Surveyed segments: predicted vs actual -> {comparison_path}")
-        print(comparison[["seg_id", "road_class", "actual_score", "predicted_score"]].to_string(index=False))
+        print(f"Surveyed segments: drone score vs model prediction vs real city PCI -> {comparison_path}")
+        print(
+            comparison[
+                ["seg_id", "arrondissement", "n_real_segments_matched", "drone_priority_score", "predicted_score", "real_indice_pci"]
+            ].to_string(index=False)
+        )
 
 
 if __name__ == "__main__":

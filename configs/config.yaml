@@ -74,10 +74,11 @@ db:
 
 # ---- Segment condition model (scikit-learn, tabular) ---------
 model:
-  # Synthetic training data: no real large-scale segment survey is available,
-  # so we simulate a plausible dataset (road class, traffic, pavement age ->
-  # priority score) to demonstrate the imputation workflow honestly.
-  n_synthetic_segments: 300
-  features_path: data/segment_features.csv
+  # Real training data: City of Montreal pavement condition survey (PCI/IRI),
+  # ~17,000 segments city-wide. See src.model.fetch_montreal_pci_data.
+  pci_source_url: "https://donnees.montreal.ca/dataset/cee47404-08bc-40e6-af71-cfcdce4617e8/resource/97489483-85f9-49cc-be33-829559439ab2/download/auscultation-chaussee-2024.gpkg"
+  features_path: data/montreal_pci_segments.gpkg
+  # Max distance (metres) to match a demo segment to a real Montreal segment.
+  match_distance_m: 30
   test_size: 0.2
   out_dir: outputs/segment_model

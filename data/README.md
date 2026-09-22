@@ -15,3 +15,9 @@ Multi-national road-damage dataset that includes a UAV/drone subset
 Provide a line-geometry layer of the road network you surveyed as
 `data/road_segments.gpkg` (GeoPackage) or update `geo.segments_path` in the config.
 For Québec roads, MTQ / open-data road-network layers work well.
+
+## Montréal pavement condition (real training data for the segment model)
+`data/montreal_pci_segments.gpkg` is downloaded automatically by
+`src.model.fetch_montreal_pci_data` from the City of Montréal's open data portal
+(~16,000 real segments with a measured Pavement Condition Index). Source:
+https://donnees.montreal.ca/dataset/condition-chaussees-reseau-routier (CC-BY 4.0).

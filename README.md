@@ -44,16 +44,16 @@ first**, which is the actual decision an asset-management team needs to make.
 Given ~2,440 UAV images of pavement, a YOLO detector finds and classifies six distress types
 (cracks, potholes, repairs). Detections are geolocated, clustered into damage hotspots with
 DBSCAN, and aggregated into a per-segment maintenance-priority score. A separate scikit-learn
-model then estimates that same condition score from tabular road attributes (traffic, age,
-class) alone — useful for segments a drone hasn't surveyed yet. Everything ends up in a
-GeoPackage that opens directly in QGIS with graduated priority symbology.
+model, trained on ~16,000 real segments from the City of Montréal's own pavement condition
+survey, then estimates a segment's real PCI from attributes available city-wide (length,
+borough, roughness) alone — useful for segments a drone hasn't surveyed yet. Everything ends up
+in a GeoPackage that opens directly in QGIS with graduated priority symbology.
 
-No real GPS-tagged flight or municipal road network was available for this project, so the
-**geospatial layer (coordinates, road segments) is an honestly-labeled synthetic demo** built
-on a real Montréal street; the detection model and the scikit-learn model are trained on real
-data. See [Limitations](#limitations--honest-caveats) for exactly where the line is drawn, and
-why the results should be read as "the pipeline works end to end," not "these are field-ready
-numbers."
+No real GPS-tagged flight was available for this project, so the **survey GPS coordinates and
+the 8 segment boundaries are an honestly-labeled synthetic demo** built on a real Montréal
+street. Everything downstream of that — the detector, the condition model, and its training and
+ground-truth data — is real. See [Limitations](#limitations--honest-caveats) for exactly where
+the line is drawn.
 
 ---
 
@@ -98,8 +98,8 @@ matters in practice:
 | **YOLO detector** | PyTorch / ultralytics | Find & classify distress on imagery | Images (deep learning) |
 | **Segment condition model** | scikit-learn | Predict condition from segment attributes | Tabular (classic ML) |
 
-The deep-learning model sees the pixels; the classic model reasons over engineered features
-(road class, traffic volume, pavement age) to **estimate condition on segments the drone never
+The deep-learning model sees the pixels; the classic model reasons over city-wide attributes
+(segment length, borough, ride roughness) to **estimate condition on segments the drone never
 flew over** — the same imputation logic used in real asset-management workflows.
 
 ---
@@ -132,11 +132,16 @@ segment (`geopandas.sjoin_nearest`, capped at `snap_distance_m`). Per segment, a
 is the confidence-weighted sum of severity weights across its detections — simple and
 explainable by design, easy to defend to a non-technical stakeholder.
 
-**7. Segment condition model (scikit-learn).** A `ColumnTransformer` (one-hot road class,
-scaled numeric features) feeds a regressor inside a `Pipeline`. Random Forest and Gradient
-Boosting are compared with 5-fold cross-validation, the winner is tuned with `GridSearchCV`, and
-feature importances are extracted — the standard "compare → tune → explain" workflow for tabular
-ML ([`segment_model.py`](src/model/segment_model.py)).
+**7. Segment condition model (scikit-learn).** Trained on the City of Montréal's real, measured
+pavement condition survey — ~16,000 segments city-wide, with a real Pavement Condition Index
+(PCI) per segment ([`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py)). A
+`ColumnTransformer` (one-hot borough, scaled numeric features) feeds a regressor inside a
+`Pipeline`. Random Forest and Gradient Boosting are compared with 5-fold cross-validation, the
+winner is tuned with `GridSearchCV`, and feature importances are extracted — the standard
+"compare → tune → explain" workflow for tabular ML
+([`segment_model.py`](src/model/segment_model.py)). The 8 drone-surveyed demo segments are then
+spatially matched to the real Montréal segments that overlap them, so they inherit real
+attributes *and* a real ground-truth PCI to compare against — see [Results](#results).
 
 **8. QGIS export.** Scored segments and hotspots are written as two layers of one GeoPackage
 ([`export_qgis.py`](src/geo/export_qgis.py)), ready for graduated symbology in QGIS.
@@ -164,8 +169,10 @@ pothole, repair. Datasets are **not** committed — see [`data/README.md`](data/
 | Detector inference on held-out test images | Real model output |
 | Street geometry | **Real** — [`fetch_osm_route.py`](src/geo/fetch_osm_route.py) pulls the actual shape of Chemin de la Côte-Sainte-Catherine, Montréal (~1.9 km, 28 OpenStreetMap way segments stitched into one line) via the Overpass API. |
 | GPS coordinates on the "survey" images | **Synthetic** — UAV-PDD2023 images carry no GPS EXIF (they're research crops, not flight photos). [`generate_synthetic_survey.py`](src/data/generate_synthetic_survey.py) simulates a drone flying along that real street's curve and stamps each test image with a point spaced by real distance along it — a fake flight, over a real road shape. |
-| Road segments | **Synthetic boundaries, real shape** — no municipal road-segment layer was available, so [`generate_synthetic_segments.py`](src/geo/generate_synthetic_segments.py) splits that same real street into 8 equal-length segments. |
-| Segment condition model's training data | **Synthetic** — 300 simulated segments (road class, traffic, age → a formula-based priority score), since no real large-scale segment survey is available. |
+| Road segment *boundaries* | **Synthetic, real shape** — no municipal road-segment layer was used for the drone demo itself, so [`generate_synthetic_segments.py`](src/geo/generate_synthetic_segments.py) splits that same real street into 8 equal-length segments. |
+| Road segment *attributes* (length, borough, roughness) | **Real** — [`segment_model.py`](src/model/segment_model.py) spatially matches each of the 8 demo segments to the real City of Montréal segments that overlap it and inherits their measured values. |
+| Segment condition model's training data | **Real** — [`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py) downloads ~16,000 real, measured segments (Pavement Condition Index) from the City of Montréal's open data portal. No synthetic/formula-based data remains in this project. |
+| Ground truth for the 8 demo segments | **Real** — the City of Montréal's own PCI rating for that exact stretch of Chemin de la Côte-Sainte-Catherine, used as an independent check on both the drone-based score and the model's prediction. |
 
 This is disclosed here instead of hidden because the whole point of the project is the
 **pipeline architecture**, not a claim of field-validated results — see
@@ -236,33 +243,45 @@ distinct streets, gaps between flights — would produce several separate hotspo
 
 ### Segment condition model
 
-5-fold cross-validated R² on the synthetic training set, before and after tuning:
+5-fold cross-validated R² on ~13,000 real Montréal segments (Longueur, Arrondissement, Indice
+IRI → Indice PCI), before and after tuning:
 
 | Model | CV R² |
 |---|---|
-| Random Forest | 0.958 |
-| Gradient Boosting (selected) | 0.961 |
+| Random Forest | 0.192 |
+| Gradient Boosting (selected) | 0.291 |
 
-Tuned Gradient Boosting (`learning_rate=0.05`, `n_estimators=100`) on the held-out test split:
-**MAE 3.92, RMSE 4.99, R² 0.970**.
+Tuned Gradient Boosting (`learning_rate=0.05`, `n_estimators=300`) on the held-out test split
+(~3,300 real segments): **MAE 15.4, RMSE 18.8, R² 0.273**.
+
+These numbers are far lower than a model would get on a formula-generated target, and that's the
+point: predicting a city's real, measured pavement condition from just length/borough/roughness
+is a genuinely hard problem — real PCI also depends on material, maintenance history, and traffic
+loading, none of which are in this feature set. An R² of 0.27 on a held-out real test set is a
+credible result for this feature set, not a broken model.
 
 ![Feature importance](figures/feature_importance.png)
 
-### Where the pipeline connects — and where it honestly doesn't (yet)
+`indice_iri` (roughness) dominates, which makes physical sense — it's the closest available
+proxy for surface condition; individual boroughs barely move the prediction on their own.
+
+### Three ways to score the same 8 segments
 
 ![Predicted vs. actual priority score](figures/segment_condition_predicted_vs_actual.png)
 
-Applying the trained model to the 8 real drone-surveyed segments and comparing against their
-detection-based `priority_score` shows a **systematic gap**: predictions are consistently lower
-than the actual score, and the ranking isn't well preserved either. This is expected, not a
-failure of the model — the 8 surveyed segments were assigned *randomly drawn* synthetic road
-attributes (no real road registry links them to actual traffic/age data), so the model is
-extrapolating from a training target it was never designed to match. Reported honestly because
-a portfolio project should show the reader where a result is solid (the CV R²/test metrics
-above, computed on data with a consistent definition) versus where it's a **methodology
-demonstration** whose numbers are not yet meaningful. Closing that gap for real would require
-one real, consistently-defined `priority_score` measured both on the ground and from drone
-detections for the same segments.
+Each of the 8 drone-surveyed segments now has three independent numbers: our drone-based
+`priority_score` (sum of weighted detections — higher is worse), the tabular model's
+`predicted_score` (same scale), and the City of Montréal's real, measured PCI for that exact
+stretch (0–100, higher is *better* — a different, bounded scale, so it gets its own panel above
+rather than being forced onto the same axis).
+
+They don't fully agree, and the most interesting case is **segment 6**: it has the *worst* real
+PCI of all 8 (31, "très mauvais") but only a middling drone-based priority score. Our proxy
+metric — counting and weighting visible cracks/potholes from images — and the city's official
+PCI — which also factors in rutting and ride roughness — are measuring related but different
+things. That's a legitimate, reportable finding, not noise: it shows exactly where a
+vision-based proxy and an official condition index can diverge, which is useful information for
+anyone deciding how much to trust drone-based scoring on its own.
 
 ### Top segments by priority
 
@@ -291,13 +310,18 @@ QGIS to explore it interactively (pan, zoom, inspect attributes per segment).
 
 ## Limitations & honest caveats
 
-- **Synthetic geospatial layer.** GPS coordinates, road segments, and the condition model's
-  training data are simulated, not field-collected — see [Data](#data). The detector itself is
-  trained on real imagery/labels.
-- **Domain gap between the two ML engines.** As shown above, the scikit-learn model's strong
-  internal metrics (R² 0.97) don't transfer to the 8 real surveyed segments, because their
-  synthetic attributes were assigned independently of their actual detection-based score. A real
-  deployment needs one consistently measured ground truth across both engines.
+- **Simulated GPS and synthetic segment boundaries.** GPS coordinates on the survey images and
+  the 8 equal-length segment boundaries are simulated, not field-collected — see [Data](#data).
+  The detector is trained on real imagery/labels, and the condition model on real, measured PCI
+  data (see below).
+- **Two different scoring systems, not directly comparable on one axis.** The drone-based
+  `priority_score` and the model's `predicted_score` share a scale; the city's real PCI is a
+  different, bounded 0–100 condition index. As shown above, they don't fully agree (segment 6 is
+  the clearest case) — that's a real, reportable finding about where a vision-based proxy and an
+  official index diverge, not a bug to hide.
+- **Modest R² (0.27) on the condition model.** Honest for the feature set used (segment length,
+  borough, roughness) — real PCI also depends on material and maintenance history, which aren't
+  in this data. A higher R² would need richer real features, not a different algorithm.
 - **Small, imbalanced test set** for the detector (e.g. only 4 pothole detections) — per-class
   metrics for rare classes are not statistically reliable yet.
 - **DBSCAN chaining on near-uniform spacing.** With detections spaced evenly along a single
@@ -319,8 +343,12 @@ hyperparameter tuning, **feature importance**, regression metrics (MAE / RMSE / 
 **DBSCAN** density-based clustering for geographic distress hotspots (unsupervised).
 
 **GIS / geospatial:** coordinate reference systems (geographic vs projected, EPSG codes),
-vector data & GeoDataFrames, **spatial joins** (`sjoin_nearest`), reprojection, multi-layer
-GeoPackages, and **graduated (choropleth) symbology** in QGIS.
+vector data & GeoDataFrames, **spatial joins** (`sjoin_nearest`, `sjoin`), reprojection,
+multi-layer GeoPackages, and **graduated (choropleth) symbology** in QGIS.
+
+**SQL / data engineering:** relational schema design (reference / fact / result tables), foreign
+keys, loading pipeline outputs into SQLite, and pulling real data from a public open-data API
+(City of Montréal's CKAN portal) instead of a hand-made dataset.
 
 > Every concept above earns its place in the pipeline. Nothing is added just to appear on a
 > checklist — if a technique had no logical use here, it was intentionally left out.
@@ -366,7 +394,10 @@ python -m src.geo.georeference --config configs/config.yaml
 # 5. DBSCAN hotspots + spatial join + aggregate to road segments
 python -m src.geo.aggregate_to_segments --config configs/config.yaml
 
-# 6. Train the scikit-learn condition model & predict per-segment condition
+# 6a. Download the real Montréal pavement condition survey (~16,000 segments)
+python -m src.model.fetch_montreal_pci_data --config configs/config.yaml
+
+# 6b. Train the scikit-learn condition model & predict per-segment condition
 python -m src.model.segment_model --config configs/config.yaml
 
 # 7. Export a QGIS-ready GeoPackage (segment_priority + distress_hotspots layers)
@@ -391,6 +422,7 @@ pavement-distress-drone/
 │   ├── data/generate_synthetic_survey.py   # simulated GPS-tagged survey (demo)
 │   ├── train/train.py                # train the YOLO detector
 │   ├── inference/detect.py           # run detection on new imagery
+│   ├── model/fetch_montreal_pci_data.py  # download real City of Montréal PCI segments
 │   ├── model/segment_model.py        # scikit-learn tabular condition model
 │   ├── reporting/make_figures.py     # regenerate README figures from outputs/
 │   └── geo/
@@ -417,10 +449,11 @@ pavement-distress-drone/
 - [x] DBSCAN distress hotspots
 - [x] Spatial join + segment priority scoring
 - [x] scikit-learn condition model (Pipeline, CV, GridSearchCV, feature importance)
+- [x] Segment condition model trained on real data (City of Montréal PCI, ~16,000 segments)
 - [x] QGIS layer export (segments + hotspots)
 - [ ] Per-class detector evaluation on a held-out split, with a larger/rebalanced dataset
 - [ ] Orthomosaic support (GeoTIFF affine transform)
-- [ ] Real road-network segments (OSM extract) instead of the synthetic 8-segment demo
+- [ ] Real road-network segments (OSM extract) instead of the synthetic 8-segment demo boundaries
 - [ ] Airflow DAG orchestrating the 7 pipeline steps
 - [x] Detections & segment scores persisted to SQLite (`sql/schema.sql`, `src/db/load_to_sqlite.py`)
 - [ ] Short demo notebook
