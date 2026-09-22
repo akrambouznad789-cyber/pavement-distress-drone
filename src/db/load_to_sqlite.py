@@ -30,17 +30,21 @@ def load_config(path: str) -> dict:
 
 def build_segments(cfg: dict) -> pd.DataFrame:
     """Geometry comes from road_segments.gpkg (seg_id + shape only); the real
-    attributes (arrondissement, length, roughness) live in
-    surveyed_vs_predicted.csv -- matched in from the City of Montreal's real
-    segments in segment_model.py. Join them on seg_id.
+    attributes (arrondissement, length, roughness, pavement age/material)
+    live in surveyed_vs_predicted.csv -- matched in from two separate City
+    of Montreal surveys in segment_model.py. Join them on seg_id.
     """
     geom = gpd.read_file(cfg["geo"]["segments_path"])
     attrs = pd.read_csv(Path(cfg["model"]["out_dir"]) / "surveyed_vs_predicted.csv")
-    attrs = attrs[["seg_id", "arrondissement", "longueur_m", "indice_iri"]]
+    attrs = attrs[
+        ["seg_id", "arrondissement", "longueur_m", "indice_iri", "pavement_age_years", "materiau_chaussee"]
+    ]
 
     segments = geom.merge(attrs, on="seg_id", how="left")
     segments["geometry_wkt"] = segments["geometry"].apply(lambda g: g.wkt)
-    return segments[["seg_id", "arrondissement", "longueur_m", "indice_iri", "geometry_wkt"]]
+    return segments[
+        ["seg_id", "arrondissement", "longueur_m", "indice_iri", "pavement_age_years", "materiau_chaussee", "geometry_wkt"]
+    ]
 
 
 def build_detections(cfg: dict) -> pd.DataFrame:

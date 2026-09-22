@@ -1,15 +1,18 @@
 -- Reference table: the road segments themselves. Attributes change rarely.
--- longueur_m/arrondissement/indice_iri are matched in from the City of
--- Montreal's real segments that overlap this one (see segment_model.py) --
--- real, measured values, not invented. NULL means no PCI-surveyed Montreal
+-- arrondissement/longueur_m/indice_iri/pavement_age_years/materiau_chaussee
+-- are matched in from two separate City of Montreal surveys (PCI + Voirie,
+-- no shared key -- see segment_model.py and enrich_with_voirie_age.py) --
+-- real, measured values, not invented. NULL means no matching real Montreal
 -- segment was found nearby (real coverage gap, not an error) -- happens for
 -- a handful of the 32 demo segments.
 CREATE TABLE IF NOT EXISTS segments (
-    seg_id           INTEGER PRIMARY KEY,
-    arrondissement   TEXT,
-    longueur_m       REAL,
-    indice_iri       REAL,
-    geometry_wkt     TEXT  -- segment shape, as WKT text (SQLite has no native geometry type)
+    seg_id              INTEGER PRIMARY KEY,
+    arrondissement      TEXT,
+    longueur_m          REAL,
+    indice_iri          REAL,
+    pavement_age_years  REAL,
+    materiau_chaussee   TEXT,
+    geometry_wkt        TEXT  -- segment shape, as WKT text (SQLite has no native geometry type)
 );
 
 -- Fact table: one row per detected distress instance. Grows with every drone survey.

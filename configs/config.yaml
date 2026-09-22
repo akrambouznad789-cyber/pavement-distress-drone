@@ -77,6 +77,10 @@ model:
   # Real training data: City of Montreal pavement condition survey (PCI/IRI),
   # ~17,000 segments city-wide. See src.model.fetch_montreal_pci_data.
   pci_source_url: "https://donnees.montreal.ca/dataset/cee47404-08bc-40e6-af71-cfcdce4617e8/resource/97489483-85f9-49cc-be33-829559439ab2/download/auscultation-chaussee-2024.gpkg"
+  # Real pavement age (construction/resurfacing dates), joined in spatially
+  # since Voirie has no shared key with the PCI survey. See
+  # src.model.enrich_with_voirie_age.
+  voirie_source_url: "https://donnees.montreal.ca/dataset/0acbc6c8-bbfc-4aae-a0fa-ec74ba0686c6/resource/98af4fca-429a-41e3-8300-80a9f52e231b/download/voi_voirie_s_v22_csv.zip"
   features_path: data/montreal_pci_segments.gpkg
   # Max distance (metres) to match a demo segment to a real Montreal segment.
   match_distance_m: 30

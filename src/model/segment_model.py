@@ -1,14 +1,16 @@
 """
 Train a scikit-learn model that predicts a road segment's real Pavement
 Condition Index (PCI) from attributes available city-wide (segment length,
-borough, roughness), so segments the drone never surveyed can still get an
-estimated condition.
+borough, roughness, and now real pavement age/material), so segments the
+drone never surveyed can still get an estimated condition.
 
 Steps:
   1. Load the real Montreal PCI segment table (see
-     src.model.fetch_montreal_pci_data) -- ~16,000 real, measured segments.
-  2. Pipeline: ColumnTransformer (one-hot arrondissement, scale numeric
-     features) -> regressor.
+     src.model.fetch_montreal_pci_data, further enriched with real pavement
+     age by src.model.enrich_with_voirie_age) -- ~16,000 real, measured
+     segments.
+  2. Pipeline: ColumnTransformer (one-hot arrondissement + material, scale
+     numeric features) -> regressor.
   3. Compare RandomForestRegressor vs GradientBoostingRegressor with
      cross-validation, then tune the winner with GridSearchCV.
   4. Evaluate the tuned model on a held-out test split (MAE / RMSE / R2) and
@@ -37,8 +39,8 @@ from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_sp
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-NUMERIC_FEATURES = ["longueur_m", "indice_iri"]
-CATEGORICAL_FEATURES = ["arrondissement"]
+NUMERIC_FEATURES = ["longueur_m", "indice_iri", "pavement_age_years"]
+CATEGORICAL_FEATURES = ["arrondissement", "materiau_chaussee"]
 TARGET = "indice_pci"
 
 
@@ -79,12 +81,15 @@ def real_features_for_surveyed_segments(
 
     rows = []
     for seg_id, g in joined.groupby("seg_id"):
+        g_age = g.dropna(subset=["pavement_age_years"])
         rows.append(
             {
                 "seg_id": seg_id,
                 "longueur_m": weighted_avg(g, "longueur_m"),
                 "indice_iri": weighted_avg(g, "indice_iri"),
+                "pavement_age_years": weighted_avg(g_age, "pavement_age_years") if len(g_age) else np.nan,
                 "arrondissement": g["arrondissement"].mode().iat[0],
+                "materiau_chaussee": g["materiau_chaussee"].mode().iat[0],
                 "real_indice_pci": weighted_avg(g, "indice_pci"),
                 "n_real_segments_matched": len(g),
             }
@@ -99,7 +104,7 @@ def main(config_path: str):
     out_dir = Path(mcfg["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = gpd.read_file(mcfg["features_path"])
+    df = gpd.read_file(mcfg["features_path"]).dropna(subset=NUMERIC_FEATURES + CATEGORICAL_FEATURES)
     X = df[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
     y = df[TARGET]
     X_train, X_test, y_train, y_test = train_test_split(
@@ -153,7 +158,8 @@ def main(config_path: str):
     plt.figure(figsize=(7, 5))
     plt.barh([feature_names[i] for i in order][::-1], importances[order][::-1])
     plt.xlabel("Feature importance")
-    plt.title(f"Segment condition model ({best_name.replace('_', ' ')})", fontsize=10)
+    model_abbrev = {"random_forest": "Random Forest", "gradient_boosting": "GBM"}[best_name]
+    plt.title(f"Segment condition model ({model_abbrev})", fontsize=10)
     plt.tight_layout()
     plt.savefig(out_dir / "feature_importance.png")
     print(f"Feature importance plot -> {out_dir / 'feature_importance.png'}")

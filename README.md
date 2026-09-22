@@ -137,14 +137,19 @@ explainable by design, easy to defend to a non-technical stakeholder.
 
 **7. Segment condition model (scikit-learn).** Trained on the City of Montréal's real, measured
 pavement condition survey — ~16,000 segments city-wide, with a real Pavement Condition Index
-(PCI) per segment ([`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py)). A
-`ColumnTransformer` (one-hot borough, scaled numeric features) feeds a regressor inside a
-`Pipeline`. Random Forest and Gradient Boosting are compared with 5-fold cross-validation, the
-winner is tuned with `GridSearchCV`, and feature importances are extracted — the standard
-"compare → tune → explain" workflow for tabular ML
-([`segment_model.py`](src/model/segment_model.py)). The 32 drone-surveyed demo segments are then
-spatially matched to the real Montréal segments that overlap them, so they inherit real
-attributes *and* a real ground-truth PCI to compare against — see [Results](#results).
+(PCI) per segment ([`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py)). Since
+the PCI survey alone predicts poorly (length/borough/roughness aren't very descriptive of *why*
+a road degrades), each segment is further enriched with its real construction/resurfacing date
+and material, spatially joined from Montréal's separate "Voirie" road-asset survey — the two
+datasets share no common key
+([`enrich_with_voirie_age.py`](src/model/enrich_with_voirie_age.py)). A `ColumnTransformer`
+(one-hot borough + material, scaled numeric features) feeds a regressor inside a `Pipeline`.
+Random Forest and Gradient Boosting are compared with 5-fold cross-validation, the winner is
+tuned with `GridSearchCV`, and feature importances are extracted — the standard "compare → tune
+→ explain" workflow for tabular ML ([`segment_model.py`](src/model/segment_model.py)). The 32
+drone-surveyed demo segments are then spatially matched to the real Montréal segments that
+overlap them, so they inherit real attributes *and* a real ground-truth PCI to compare against
+— see [Results](#results).
 
 **8. QGIS export.** Scored segments and hotspots are written as two layers of one GeoPackage
 ([`export_qgis.py`](src/geo/export_qgis.py)), ready for graduated symbology in QGIS.
@@ -173,7 +178,7 @@ pothole, repair. Datasets are **not** committed — see [`data/README.md`](data/
 | Street network & segment boundaries | **Real** — [`fetch_osm_network.py`](src/geo/fetch_osm_network.py) pulls every real drivable street (32 segments, 15 named streets) in a Montréal neighbourhood near Polytechnique from OpenStreetMap. Each segment is a real OSM way, the same block-to-block granularity the City of Montréal uses for its own PCI survey — not an arbitrary division. |
 | GPS coordinates on the "survey" images | **Synthetic** — UAV-PDD2023 images carry no GPS EXIF (they're research crops, not flight photos). [`generate_synthetic_survey.py`](src/data/generate_synthetic_survey.py) assigns each test image a random point on a random real segment (weighted by segment length) — a fake flight, over real streets. |
 | Road segment *attributes* (length, borough, roughness) | **Real** — [`segment_model.py`](src/model/segment_model.py) spatially matches each of the 32 demo segments to the real City of Montréal segments that overlap it and inherits their measured values. |
-| Segment condition model's training data | **Real** — [`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py) downloads ~16,000 real, measured segments (Pavement Condition Index) from the City of Montréal's open data portal. No synthetic/formula-based data remains in this project. |
+| Segment condition model's training data | **Real** — [`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py) downloads ~16,000 real, measured segments (Pavement Condition Index) from the City of Montréal's open data portal, enriched with real pavement age/material by [`enrich_with_voirie_age.py`](src/model/enrich_with_voirie_age.py) (a second, separately sourced City of Montréal survey, spatially joined — no shared key). No synthetic/formula-based data remains in this project. |
 | Ground truth for the 32 demo segments | **Real** — the City of Montréal's own PCI rating for those exact streets, used as an independent check on both the drone-based score and the model's prediction. |
 
 This is disclosed here instead of hidden because the whole point of the project is the
@@ -245,27 +250,32 @@ meant to do, finding real, spatially distinct concentrations of damage.
 
 ### Segment condition model
 
-5-fold cross-validated R² on ~13,000 real Montréal segments (Longueur, Arrondissement, Indice
-IRI → Indice PCI), before and after tuning:
+**First pass** — length, borough, and roughness only — gave a modest CV R² of 0.29 (Gradient
+Boosting) and a test R² of 0.27. Predicting real pavement condition from so little was always
+going to be hard: none of those three features has a strong *causal* link to why a road
+degrades. So a second real dataset was added — the City of Montréal's separate "Voirie"
+road-asset survey, spatially joined in (no shared key) to pull each segment's real
+construction/resurfacing date (→ pavement age) and material
+([`enrich_with_voirie_age.py`](src/model/enrich_with_voirie_age.py)):
 
-| Model | CV R² |
-|---|---|
-| Random Forest | 0.192 |
-| Gradient Boosting (selected) | 0.291 |
+| Model | CV R² — length/borough/roughness only | CV R² — + real pavement age/material |
+|---|---|---|
+| Random Forest | 0.192 | 0.345 |
+| Gradient Boosting (selected) | 0.291 | **0.370** |
 
-Tuned Gradient Boosting (`learning_rate=0.05`, `n_estimators=300`) on the held-out test split
-(~3,300 real segments): **MAE 15.4, RMSE 18.8, R² 0.273**.
-
-These numbers are far lower than a model would get on a formula-generated target, and that's the
-point: predicting a city's real, measured pavement condition from just length/borough/roughness
-is a genuinely hard problem — real PCI also depends on material, maintenance history, and traffic
-loading, none of which are in this feature set. An R² of 0.27 on a held-out real test set is a
-credible result for this feature set, not a broken model.
+Tuned Gradient Boosting (`learning_rate=0.1`, `n_estimators=300`) on the held-out test split
+(~3,300 real segments): **MAE 14.1, RMSE 17.5, R² 0.354** — up from R² 0.27. Adding one genuinely
+causal real feature (pavement age) moved the needle more than switching algorithms or tuning
+hyperparameters did. Still not a "field-ready" model — real PCI also depends on maintenance
+history and traffic loading, which aren't in this data either — but the improvement is honest
+and explainable, which matters more here than the absolute number.
 
 ![Feature importance](figures/feature_importance.png)
 
-`indice_iri` (roughness) dominates, which makes physical sense — it's the closest available
-proxy for surface condition; individual boroughs barely move the prediction on their own.
+`indice_iri` (roughness) still dominates, but `pavement_age_years` is now the clear second
+feature — exactly the causal signal that was missing before. `materiau_chaussee` barely moves
+the needle, which also makes sense: 97.5% of the surveyed streets are simply asphalt, so there's
+almost no variation for the model to learn from.
 
 ### Three ways to score the same segments
 
@@ -278,9 +288,9 @@ higher is worse), the tabular model's `predicted_score` (same scale), and the ci
 measured PCI (0–100, higher is *better* — a different, bounded scale, so it gets its own panel).
 
 They don't fully agree, and the clearest case is **segment 24**: the drone found *zero*
-detections there (nothing to flag), yet its real PCI is 18.9 — "très mauvais," one of the worst
+detections there (nothing to flag), yet its real PCI is 18.6 — "très mauvais," one of the worst
 in the whole neighbourhood. Contrast that with **segment 29**, also zero detections, but a real
-PCI of 70.1 — genuinely good condition. Same drone-based signal (nothing detected), opposite
+PCI of 68.4 — decent condition. Same drone-based signal (nothing detected), opposite
 ground truth. That's the honest limit of a crack/pothole detector as a condition proxy: it
 scores what's visible in a photo, while the city's PCI also captures rutting, patching, and ride
 roughness that a photo of the surface alone won't show. Reporting this divergence is more useful
@@ -404,7 +414,10 @@ python -m src.geo.aggregate_to_segments --config configs/config.yaml
 # 6a. Download the real Montréal pavement condition survey (~16,000 segments)
 python -m src.model.fetch_montreal_pci_data --config configs/config.yaml
 
-# 6b. Train the scikit-learn condition model & predict per-segment condition
+# 6b. Enrich it with real pavement age/material (spatial join, no shared key)
+python -m src.model.enrich_with_voirie_age --config configs/config.yaml
+
+# 6c. Train the scikit-learn condition model & predict per-segment condition
 python -m src.model.segment_model --config configs/config.yaml
 
 # 7. Export a QGIS-ready GeoPackage (segment_priority + distress_hotspots layers)
@@ -430,6 +443,7 @@ pavement-distress-drone/
 │   ├── train/train.py                # train the YOLO detector
 │   ├── inference/detect.py           # run detection on new imagery
 │   ├── model/fetch_montreal_pci_data.py  # download real City of Montréal PCI segments
+│   ├── model/enrich_with_voirie_age.py   # spatially join real pavement age/material
 │   ├── model/segment_model.py        # scikit-learn tabular condition model
 │   ├── reporting/make_figures.py     # regenerate README figures from outputs/
 │   └── geo/
