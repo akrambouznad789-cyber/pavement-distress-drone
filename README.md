@@ -12,6 +12,20 @@ maintenance first.
 
 ---
 
+## In plain terms
+
+> Roads wear down over time — cracks, potholes. Today, inspecting them is often done on foot or
+> by truck: slow and expensive. This project shows how a **drone flying over the road** can do
+> that job faster: an AI trained to recognize cracks and potholes automatically spots the damage
+> in the photos, places it on a real map, groups nearby damage into "problem zones," then
+> calculates a **priority score** to know which stretch of road to fix first. For sections the
+> drone hasn't surveyed yet, a second model uses simple information (road type, traffic, age) to
+> still estimate their likely condition. The result is a map that shows, street by street, where
+> to step in first — exactly the kind of tool a city would use to plan road maintenance on a
+> limited budget.
+
+---
+
 ## Executive summary
 
 Given ~2,440 UAV images of pavement, a YOLO detector finds and classifies six distress types
