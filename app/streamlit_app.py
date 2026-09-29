@@ -139,13 +139,17 @@ with tab_map:
     )
     # pydeck wants plain lists of [lon, lat] points, not shapely geometries.
     segments["path"] = segments.geometry.apply(lambda g: [list(xy) for xy in g.coords])
-    # Tooltip values as text, "no match" where the segment has no real Montréal PCI.
-    # (Raw NaN values would also break pydeck's JSON serialization, so they're dropped.)
+    # Tooltip values as text: "no match" where the segment has no real Montréal PCI, "none"
+    # where the drone found nothing. Why it matters: pydeck sends the data to the browser as
+    # JSON, and a missing value (NaN) is not valid JSON, so a single NaN anywhere makes the
+    # whole map fail to render.
     as_text = lambda col: segments[col].round(1).map(lambda v: "no match" if pd.isna(v) else f"{v:.1f}")
     seg_data = segments.assign(
         priority=segments["priority_score"].round(1), real_pci=as_text("real_indice_pci"),
-        pred_pci=as_text("predicted_score"),
+        pred_pci=as_text("predicted_score"), worst_class=segments["worst_class"].fillna("none"),
     ).drop(columns=["geometry", "real_indice_pci", "predicted_score"])
+    # Safety net for any other missing value: None becomes JSON null, which is valid.
+    seg_data = seg_data.astype(object).where(seg_data.notna(), None)
 
     layers = [
         pdk.Layer("PathLayer", seg_data, get_path="path", get_color="color", get_width=8,
