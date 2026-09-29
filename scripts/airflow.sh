@@ -25,4 +25,7 @@ fi
 export PAVEMENT_PYTHON
 
 AIRFLOW_BIN="${AIRFLOW_BIN:-$HOME/airflow-venv/bin/airflow}"
+# Put Airflow's venv first on PATH, like activating it: `airflow standalone` starts its
+# components (API server, scheduler...) as separate `airflow ...` processes found via PATH.
+export PATH="$(dirname "$AIRFLOW_BIN"):$PATH"
 "$AIRFLOW_BIN" "$@"
