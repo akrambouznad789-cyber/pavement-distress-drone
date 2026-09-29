@@ -1,0 +1,15 @@
+{
+  "cv_r2": {
+    "random_forest": 0.34461602037932393,
+    "gradient_boosting": 0.3696872654035645
+  },
+  "best_params": {
+    "reg__learning_rate": 0.1,
+    "reg__n_estimators": 300
+  },
+  "test": {
+    "mae": 14.09904277074841,
+    "rmse": 17.479937910345686,
+    "r2": 0.3540354603304372
+  }
+}

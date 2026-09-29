@@ -1,10 +1,16 @@
-# Data & model artifacts (never commit large binaries)
+# Data & model artifacts: raw data is never committed (multi-GB).
 data/**
 !data/README.md
+# Models: only the small trained weights (5 MB) + training log are committed,
+# so the demo notebook and app run without retraining.
 models/**
 !models/.gitkeep
-outputs/**
-!outputs/.gitkeep
+!models/baseline/
+!models/baseline/results.csv
+!models/baseline/weights/
+!models/baseline/weights/best.pt
+# outputs/ (~1.4 MB: detections, GeoPackages, SQLite DB) is committed on purpose:
+# it's the pipeline's result, read by the notebook and the app.
 
 # Python
 __pycache__/
