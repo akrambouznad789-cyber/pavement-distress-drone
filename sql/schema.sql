@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS segment_scores (
     n_detections     INTEGER,
     worst_class      TEXT,
     priority_score   REAL,  -- computed from real drone detections
-    predicted_score  REAL,  -- estimated by the scikit-learn condition model
+    predicted_score  REAL,  -- PCI predicted by the scikit-learn condition model (0-100, higher = better)
     real_indice_pci  REAL,  -- the City of Montreal's own measured PCI for this stretch
     priority_rank    INTEGER
 );

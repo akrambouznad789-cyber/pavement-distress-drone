@@ -19,10 +19,9 @@ maintenance first.
 > that job faster: an AI trained to recognize cracks and potholes automatically spots the damage
 > in the photos, places it on a real map, groups nearby damage into "problem zones," then
 > calculates a **priority score** to know which stretch of road to fix first. For sections the
-> drone hasn't surveyed yet, a second model uses simple information (street length, borough,
-> road roughness) to still estimate their likely condition. The result is a map that shows,
-> street by street, where
-> to step in first — exactly the kind of tool a city would use to plan road maintenance on a
+> drone hasn't surveyed yet, a second model uses simple information the city already has (street
+> length, borough, road roughness, pavement age) to still estimate their likely condition. The
+> result is a map that shows, street by street, where to step in first — exactly the kind of tool a city would use to plan road maintenance on a
 > limited budget.
 
 ---
@@ -47,7 +46,7 @@ Given ~2,440 UAV images of pavement, a YOLO detector finds and classifies six di
 DBSCAN, and aggregated into a per-segment maintenance-priority score. A separate scikit-learn
 model, trained on ~16,000 real segments from the City of Montréal's own pavement condition
 survey, then estimates a segment's real PCI from attributes available city-wide (length,
-borough, roughness) alone — useful for segments a drone hasn't surveyed yet. Everything ends up
+borough, roughness, pavement age and material) alone — useful for segments a drone hasn't surveyed yet. Everything ends up
 in a GeoPackage that opens directly in QGIS with graduated priority symbology.
 
 No real GPS-tagged flight was available for this project, so the **survey GPS coordinates are an
@@ -57,6 +56,11 @@ Everything downstream of that — the segment boundaries themselves, the detecto
 model, and its training and ground-truth data — is real. See
 [Limitations](#limitations--honest-caveats) for exactly where
 the line is drawn.
+
+> **Quickest way in:** the [walkthrough notebook](notebooks/demo_pipeline.ipynb) runs through
+> every step (detection, map, hotspots, priority, condition model, SQL) with its outputs saved,
+> so it reads directly on GitHub. The trained weights and pipeline outputs are committed, so it
+> also re-runs locally in under a minute on a CPU, with no dataset download.
 
 ---
 
@@ -84,7 +88,7 @@ flowchart LR
     E --> G[Spatial join to<br/>nearest segment]
     G --> H[Aggregate priority<br/>score per segment]
     H --> I[scikit-learn<br/>condition model]
-    I --> J[Priority score,<br/>surveyed + predicted]
+    I --> J[Priority score +<br/>predicted PCI]
     F --> K[QGIS layer<br/>GeoPackage]
     J --> K
 ```
@@ -102,7 +106,7 @@ matters in practice:
 | **Segment condition model** | scikit-learn | Predict condition from segment attributes | Tabular (classic ML) |
 
 The deep-learning model sees the pixels; the classic model reasons over city-wide attributes
-(segment length, borough, ride roughness) to **estimate condition on segments the drone never
+(segment length, borough, ride roughness, pavement age) to **estimate condition on segments the drone never
 flew over** — the same imputation logic used in real asset-management workflows.
 
 ---
@@ -164,7 +168,7 @@ Built around an open UAV pavement-distress dataset:
 
 | Dataset | Content | Notes |
 |---|---|---|
-| **UAV-PDD2023** | ~2,440 drone images, ~11k instances (6 classes) | Used for detector training/eval |
+| **UAV-PDD2023** | ~2,440 drone images, ~11k instances (6 classes) | Used for detector training/eval. H. Yan & J. Zhang, Hebei University of Technology, [Zenodo](https://zenodo.org/records/8429208), CC-BY 4.0 |
 
 Distress classes: longitudinal crack, transverse crack, oblique crack, alligator crack,
 pothole, repair. Datasets are **not** committed — see [`data/README.md`](data/README.md).
@@ -177,7 +181,7 @@ pothole, repair. Datasets are **not** committed — see [`data/README.md`](data/
 | Detector inference on held-out test images | Real model output |
 | Street network & segment boundaries | **Real** — [`fetch_osm_network.py`](src/geo/fetch_osm_network.py) pulls every real drivable street (32 segments, 15 named streets) in a Montréal neighbourhood near Polytechnique from OpenStreetMap. Each segment is a real OSM way, the same block-to-block granularity the City of Montréal uses for its own PCI survey — not an arbitrary division. |
 | GPS coordinates on the "survey" images | **Synthetic** — UAV-PDD2023 images carry no GPS EXIF (they're research crops, not flight photos). [`generate_synthetic_survey.py`](src/data/generate_synthetic_survey.py) assigns each test image a random point on a random real segment (weighted by segment length) — a fake flight, over real streets. |
-| Road segment *attributes* (length, borough, roughness) | **Real** — [`segment_model.py`](src/model/segment_model.py) spatially matches each of the 32 demo segments to the real City of Montréal segments that overlap it and inherits their measured values. |
+| Road segment *attributes* (length, borough, roughness, pavement age/material) | **Real** — [`segment_model.py`](src/model/segment_model.py) spatially matches each of the 32 demo segments to the real City of Montréal segments that overlap it and inherits their measured values. |
 | Segment condition model's training data | **Real** — [`fetch_montreal_pci_data.py`](src/model/fetch_montreal_pci_data.py) downloads ~16,000 real, measured segments (Pavement Condition Index) from the City of Montréal's open data portal, enriched with real pavement age/material by [`enrich_with_voirie_age.py`](src/model/enrich_with_voirie_age.py) (a second, separately sourced City of Montréal survey, spatially joined — no shared key). No synthetic/formula-based data remains in this project. |
 | Ground truth for the 32 demo segments | **Real** — the City of Montréal's own PCI rating for those exact streets, used as an independent check on both the drone-based score and the model's prediction. |
 
@@ -279,28 +283,41 @@ almost no variation for the model to learn from.
 
 ### Three ways to score the same segments
 
-![Predicted vs. actual priority score](figures/segment_condition_predicted_vs_actual.png)
+![Model-predicted PCI and drone score vs. the city's real PCI](figures/segment_condition_predicted_vs_actual.png)
 
 26 of the 32 demo segments matched a real City of Montréal PCI segment nearby (the other 6 fall
 outside the city's surveyed network — a real coverage gap, not an error). Each of those 26 now
-has three independent numbers: our drone-based `priority_score` (sum of weighted detections —
-higher is worse), the tabular model's `predicted_score` (same scale), and the city's real,
-measured PCI (0–100, higher is *better* — a different, bounded scale, so it gets its own panel).
+has three independent numbers, on two different scales:
 
-They don't fully agree, and the clearest case is **segment 24**: the drone found *zero*
+- the city's real, measured **PCI** (0–100, higher is *better*);
+- the condition model's **predicted PCI** (`predicted_score`, same 0–100 scale, so it shares the
+  left panel with the real PCI);
+- our drone-based **`priority_score`** (confidence-weighted sum of detection severities, higher
+  is *worse*), on its own panel.
+
+How well does each track the real PCI? Spearman rank correlation across the 26 segments:
+**0.48 for the condition model** (mean absolute error 11.9 PCI points) and **−0.13 for the drone
+score**, i.e. no signal. The drone result is expected, not a failure of the detector: the survey
+positions are simulated (each photo is dropped on a random street), so which street a detection
+lands on carries no information about that street. The left panel also shows the condition
+model's main weakness: its predictions are compressed toward the city average (~60), so it
+overestimates the worst streets (PCI < 30), a typical symptom of a model with R² ≈ 0.35.
+
+The clearest single case is **segment 24**: the drone found *zero*
 detections there (nothing to flag), yet its real PCI is 18.6 — "très mauvais," one of the worst
 in the whole neighbourhood. Contrast that with **segment 29**, also zero detections, but a real
 PCI of 68.4 — decent condition. Same drone-based signal (nothing detected), opposite
 ground truth. That's the honest limit of a crack/pothole detector as a condition proxy: it
 scores what's visible in a photo, while the city's PCI also captures rutting, patching, and ride
-roughness that a photo of the surface alone won't show. Reporting this divergence is more useful
-than hiding it — it tells a reader exactly how much to trust drone-based scoring on its own.
+roughness that a photo of the surface alone won't show. With simulated positions, this example
+can't be over-interpreted: it illustrates the check a real deployment would run, rather than
+proving the detector wrong. Reporting it is more useful than hiding it.
 
 ### Top segments by priority
 
 Out of 32 real street segments in the neighbourhood:
 
-| Segment | Priority score | Detections | Dominant issue |
+| Segment | Priority score | Detections | Most severe class found |
 |---|---|---|---|
 | 12 | 99.0 | 85 | alligator_crack |
 | 31 | 77.6 | 73 | pothole |
@@ -331,14 +348,16 @@ QGIS to explore it interactively (pan, zoom, inspect attributes per segment).
   real segment, weighted by length) — no real flight happened. Everything else — the street
   network and segment boundaries, the detector, and the condition model's training and
   ground-truth data — is real; see [Data](#data).
-- **Two different scoring systems, not directly comparable on one axis.** The drone-based
-  `priority_score` and the model's `predicted_score` share a scale; the city's real PCI is a
-  different, bounded 0–100 condition index. As shown above, they don't fully agree (segment 24
-  is the clearest case) — that's a real, reportable finding about where a vision-based proxy and
-  an official index diverge, not a bug to hide.
-- **Modest R² (0.27) on the condition model.** Honest for the feature set used (segment length,
-  borough, roughness) — real PCI also depends on material and maintenance history, which aren't
-  in this data. A higher R² would need richer real features, not a different algorithm.
+- **Two different scales.** The drone-based `priority_score` is a severity sum (higher =
+  worse); the model's `predicted_score` and the city's real PCI are both 0–100 condition indices
+  (higher = better). Because the survey positions are simulated, the drone score can't be
+  validated against the real PCI here (rank correlation −0.13): that needs a real geotagged
+  flight.
+- **Modest R² (0.354) on the condition model.** Adding real pavement age raised it from 0.27,
+  but real PCI also depends on traffic loading and maintenance history, which aren't in open
+  data. Predictions are compressed toward the city average, so the worst streets are
+  overestimated. The most promising next feature is each segment's *past* PCI (the survey has
+  several years), the standard predictor in pavement-management deterioration models.
 - **Small, imbalanced test set** for the detector (e.g. only 4 pothole detections) — per-class
   metrics for rare classes are not statistically reliable yet.
 - **6 of 32 segments have no real PCI match** — they fall outside the City of Montréal's
@@ -376,7 +395,7 @@ keys, loading pipeline outputs into SQLite, and pulling real data from a public 
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/pavement-distress-drone.git
+git clone https://github.com/akrambouznad789-cyber/pavement-distress-drone.git
 cd pavement-distress-drone
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -389,6 +408,12 @@ any CPU.
 ---
 
 ## Usage
+
+**Quick demo (no download needed):** open [`notebooks/demo_pipeline.ipynb`](notebooks/demo_pipeline.ipynb)
+and run all cells. It uses the committed weights, sample images (`assets/sample_images/`) and
+`outputs/`.
+
+**Full pipeline** (needs the UAV-PDD2023 dataset in `data/`, see [`data/README.md`](data/README.md)):
 
 ```bash
 # 0. Demo data setup -- only needed to reproduce the synthetic demo; skip
@@ -453,11 +478,12 @@ pavement-distress-drone/
 │       └── export_qgis.py                # write GeoPackage for QGIS
 │   └── db/load_to_sqlite.py          # load outputs/ into a queryable SQLite database
 ├── sql/schema.sql                    # the 3-table schema (segments, detections, segment_scores)
-├── notebooks/                        # exploration & demo
+├── notebooks/demo_pipeline.ipynb     # step-by-step walkthrough, outputs saved
+├── assets/sample_images/             # 3 UAV-PDD2023 images for the demo
 ├── figures/                          # committed, reproducible README figures
 ├── data/                             # datasets (git-ignored)
-├── models/                           # trained weights (git-ignored)
-└── outputs/                          # detections, hotspots, scored segments, pavement.db (git-ignored)
+├── models/baseline/                  # trained weights best.pt (5 MB) + training log
+└── outputs/                          # detections, hotspots, scored segments, pavement.db
 ```
 
 ---
@@ -473,10 +499,10 @@ pavement-distress-drone/
 - [x] QGIS layer export (segments + hotspots)
 - [ ] Per-class detector evaluation on a held-out split, with a larger/rebalanced dataset
 - [ ] Orthomosaic support (GeoTIFF affine transform)
-- [ ] Real road-network segments (OSM extract) instead of the synthetic 8-segment demo boundaries
+- [x] Real road-network segments (OSM extract, 32 segments) instead of synthetic demo boundaries
 - [ ] Airflow DAG orchestrating the 7 pipeline steps
 - [x] Detections & segment scores persisted to SQLite (`sql/schema.sql`, `src/db/load_to_sqlite.py`)
-- [ ] Short demo notebook
+- [x] Short demo notebook ([`notebooks/demo_pipeline.ipynb`](notebooks/demo_pipeline.ipynb))
 - [ ] (Stretch) Streamlit demo for drag-and-drop inference
 
 ---

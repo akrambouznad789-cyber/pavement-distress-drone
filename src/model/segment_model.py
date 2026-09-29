@@ -15,10 +15,11 @@ Steps:
      cross-validation, then tune the winner with GridSearchCV.
   4. Evaluate the tuned model on a held-out test split (MAE / RMSE / R2) and
      plot feature importance.
-  5. Spatially match our 8 drone-surveyed demo segments to the real Montreal
+  5. Spatially match our 32 drone-surveyed demo segments to the real Montreal
      segments that overlap them (same street, real geometry), so they inherit
      real attributes -- then apply the trained model and compare three
-     values: our drone-based priority_score, the model's predicted_score,
+     values: our drone-based priority_score (severity sum, higher = worse),
+     the model's predicted_score (a predicted PCI, 0-100, higher = better),
      and the city's own real indice_pci for that stretch of road.
 """
 from __future__ import annotations
@@ -61,7 +62,7 @@ def build_preprocessor() -> ColumnTransformer:
 def real_features_for_surveyed_segments(
     segments_path: str, montreal_pci_path: str, metric_crs: str, match_distance_m: float
 ) -> gpd.GeoDataFrame:
-    """Match each of our 8 demo segments to the real Montreal segments whose
+    """Match each of our 32 demo segments to the real Montreal segments whose
     geometry falls within `match_distance_m` of it (there are several real,
     short block-to-block segments per demo segment), and aggregate their real
     attributes -- length-weighted for PCI/IRI, most common borough. This
@@ -164,7 +165,7 @@ def main(config_path: str):
     plt.savefig(out_dir / "feature_importance.png")
     print(f"Feature importance plot -> {out_dir / 'feature_importance.png'}")
 
-    # Match our 8 demo segments to real Montreal segments, apply the model,
+    # Match our 32 demo segments to real Montreal segments, apply the model,
     # and compare against both our drone-based score and the city's real PCI.
     scored_path = Path("outputs") / "segments_scored.gpkg"
     if scored_path.exists():

@@ -46,36 +46,41 @@ def segment_condition_predicted_vs_actual():
     """Three-way comparison on the demo segments that matched a real City of
     Montreal PCI segment: our drone-based priority score, the tabular
     model's prediction, and the city's real, measured PCI for that same
-    stretch of road. The first two share a scale (severity sum, higher =
-    worse); real PCI is a different, bounded 0-100 condition scale (higher =
-    better) -- so it gets its own panel. Sorted by drone score (descending)
-    so the two panels stay readable with more than a handful of segments.
+    stretch of road.
+
+    Two different scales, so two panels: the model predicts a PCI (0-100,
+    higher = better), the same scale as the city's real PCI, so those two
+    share the left panel. The drone score is a severity sum (higher = worse)
+    and gets its own panel. Both panels use the same segment order, sorted by
+    real PCI (worst first), so a reader can check whether the drone flags
+    the streets the city rates worst.
     """
     df = pd.read_csv("outputs/segment_model/surveyed_vs_predicted.csv")
-    df = df.sort_values("drone_priority_score", ascending=False).reset_index(drop=True)
+    df = df.sort_values("real_indice_pci").reset_index(drop=True)
     x = range(len(df))
-    width = 0.35
+    labels = [f"seg {i}" for i in df["seg_id"]]
+    width = 0.4
 
-    fig, (ax_severity, ax_pci) = plt.subplots(1, 2, figsize=(13, 4.5))
+    fig, (ax_pci, ax_drone) = plt.subplots(1, 2, figsize=(13, 4.5))
 
-    ax_severity.bar([i - width / 2 for i in x], df["drone_priority_score"], width,
-                     label="Drone-based (detections)", color="#c53030")
-    ax_severity.bar([i + width / 2 for i in x], df["predicted_score"], width,
-                     label="Tabular model prediction", color="#2b6cb0")
-    ax_severity.set_xticks(list(x))
-    ax_severity.set_xticklabels([f"seg {i}" for i in df["seg_id"]], rotation=90, fontsize=8)
-    ax_severity.set_ylabel("Priority score (higher = worse)")
-    ax_severity.set_title("Severity score: drone vs. model")
-    ax_severity.legend(fontsize=8)
-
-    ax_pci.bar(list(x), df["real_indice_pci"], color="#38a169")
+    ax_pci.bar([i - width / 2 for i in x], df["real_indice_pci"], width,
+               label="Real PCI (City of Montréal)", color="#38a169")
+    ax_pci.bar([i + width / 2 for i in x], df["predicted_score"], width,
+               label="Predicted PCI (condition model)", color="#2b6cb0")
     ax_pci.set_xticks(list(x))
-    ax_pci.set_xticklabels([f"seg {i}" for i in df["seg_id"]], rotation=90, fontsize=8)
-    ax_pci.set_ylabel("Real PCI (higher = better)")
+    ax_pci.set_xticklabels(labels, rotation=90, fontsize=8)
+    ax_pci.set_ylabel("PCI (higher = better)")
     ax_pci.set_ylim(0, 100)
-    ax_pci.set_title("City of Montréal's real PCI (ground truth)")
+    ax_pci.set_title("Condition: model vs. the city's real PCI")
+    ax_pci.legend(fontsize=8, loc="upper left")
 
-    fig.suptitle("Segment condition: proxy scores vs. the city's real measurement", fontweight="bold")
+    ax_drone.bar(list(x), df["drone_priority_score"], color="#c53030")
+    ax_drone.set_xticks(list(x))
+    ax_drone.set_xticklabels(labels, rotation=90, fontsize=8)
+    ax_drone.set_ylabel("Drone priority score (higher = worse)")
+    ax_drone.set_title("Drone-based score (simulated survey positions)")
+
+    fig.suptitle("Segment condition, sorted by the city's real PCI (worst first)", fontweight="bold")
     fig.tight_layout()
     fig.savefig(FIGURES_DIR / "segment_condition_predicted_vs_actual.png")
     plt.close(fig)
