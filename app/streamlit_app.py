@@ -24,6 +24,7 @@ import matplotlib
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
+from pydeck.types import String
 import yaml
 from PIL import Image
 from ultralytics import YOLO
@@ -151,9 +152,12 @@ with tab_map:
     # Safety net for any other missing value: None becomes JSON null, which is valid.
     seg_data = seg_data.astype(object).where(seg_data.notna(), None)
 
+    # Careful: pydeck reads every plain string as a column name ("path" -> each row's path).
+    # A literal text value like "pixels" must be wrapped in String(), otherwise pydeck looks
+    # for a "pixels" column, the unit is lost, and the lines are drawn thousands of pixels wide.
     layers = [
-        pdk.Layer("PathLayer", seg_data, get_path="path", get_color="color", get_width=8,
-                  width_units="pixels", pickable=True)
+        pdk.Layer("PathLayer", seg_data, get_path="path", get_color="color", get_width=6,
+                  width_units=String("pixels"), cap_rounded=True, joint_rounded=True, pickable=True)
     ]
     if show_hotspots:
         hotspots["polygon"] = hotspots.geometry.apply(lambda g: [list(xy) for xy in g.exterior.coords])
