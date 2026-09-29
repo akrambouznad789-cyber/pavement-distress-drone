@@ -124,10 +124,12 @@ epochs — nano-sized because training runs on a free Colab GPU, not local hardw
 ([`detect.py`](src/inference/detect.py)), producing a bounding box, class, and confidence per
 detection.
 
-**4. Georeferencing.** Each detection's pixel bounding box is converted to a real-world
-coordinate. Two strategies are supported: image EXIF GPS tags, or an orthomosaic's affine
-transform ([`georeference.py`](src/geo/georeference.py)); this project uses the EXIF path with
-simulated tags (see [Data](#data)).
+**4. Georeferencing.** Each detection is placed on the map using the GPS position stored in its
+photo's EXIF metadata ([`georeference.py`](src/geo/georeference.py)), here simulated tags (see
+[Data](#data)). Every detection on a photo inherits that photo's position, so the precision is
+the photo's footprint, not the exact box. An orthomosaic (one stitched, georeferenced GeoTIFF)
+would give each box its own exact coordinate through the raster's affine transform; that path is
+documented as a hook in `georeference.py` but not implemented.
 
 **5. Hotspot detection (DBSCAN).** All georeferenced points are projected into a metric CRS and
 clustered with **DBSCAN** — density-based, unsupervised, no need to pre-specify a number of
@@ -563,13 +565,19 @@ pavement-distress-drone/
 - [x] scikit-learn condition model (Pipeline, CV, GridSearchCV, feature importance)
 - [x] Segment condition model trained on real data (City of Montréal PCI, ~16,000 segments)
 - [x] QGIS layer export (segments + hotspots)
-- [ ] Per-class detector evaluation on a held-out split, with a larger/rebalanced dataset
-- [ ] Orthomosaic support (GeoTIFF affine transform)
 - [x] Real road-network segments (OSM extract, 32 segments) instead of synthetic demo boundaries
 - [x] Airflow DAG orchestrating the pipeline ([`dags/pavement_pipeline.py`](dags/pavement_pipeline.py))
 - [x] Detections & segment scores persisted to SQLite (`sql/schema.sql`, `src/db/load_to_sqlite.py`)
 - [x] Short demo notebook ([`notebooks/demo_pipeline.ipynb`](notebooks/demo_pipeline.ipynb))
 - [x] Streamlit demo: drag-and-drop inference + interactive priority map ([`app/streamlit_app.py`](app/streamlit_app.py))
+
+**Future work** (out of scope for this project):
+
+- A real geotagged flight over the surveyed streets, to validate the drone score against the
+  city's PCI (impossible with simulated positions)
+- Orthomosaic support (GeoTIFF affine transform), for per-box coordinates instead of per-photo
+- Per-class detector evaluation on a larger, rebalanced dataset (only 4 pothole detections today)
+- Historical PCI as a feature for the condition model
 
 ---
 
