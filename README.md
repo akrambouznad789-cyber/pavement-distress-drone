@@ -60,7 +60,9 @@ the line is drawn.
 > **Quickest way in:** the [walkthrough notebook](notebooks/demo_pipeline.ipynb) runs through
 > every step (detection, map, hotspots, priority, condition model, SQL) with its outputs saved,
 > so it reads directly on GitHub. The trained weights and pipeline outputs are committed, so it
-> also re-runs locally in under a minute on a CPU, with no dataset download.
+> also re-runs locally in under a minute on a CPU, with no dataset download. For an
+> interactive version (upload your own drone photo, explore the priority map), run the
+> [Streamlit app](app/streamlit_app.py): `streamlit run app/streamlit_app.py`.
 
 ---
 
@@ -413,6 +415,11 @@ any CPU.
 and run all cells. It uses the committed weights, sample images (`assets/sample_images/`) and
 `outputs/`.
 
+**Interactive app:** `streamlit run app/streamlit_app.py` opens a local web app with three tabs:
+run the detector on an uploaded or sample image (with a confidence slider), an interactive map of
+the 32 scored segments and DBSCAN hotspots (hover for scores and the city's real PCI), and the
+condition model's results.
+
 **Full pipeline** (needs the UAV-PDD2023 dataset in `data/`, see [`data/README.md`](data/README.md)):
 
 ```bash
@@ -479,6 +486,7 @@ pavement-distress-drone/
 │   └── db/load_to_sqlite.py          # load outputs/ into a queryable SQLite database
 ├── sql/schema.sql                    # the 3-table schema (segments, detections, segment_scores)
 ├── notebooks/demo_pipeline.ipynb     # step-by-step walkthrough, outputs saved
+├── app/streamlit_app.py              # interactive demo: detection, priority map, condition model
 ├── assets/sample_images/             # 3 UAV-PDD2023 images for the demo
 ├── figures/                          # committed, reproducible README figures
 ├── data/                             # datasets (git-ignored)
@@ -503,7 +511,7 @@ pavement-distress-drone/
 - [ ] Airflow DAG orchestrating the 7 pipeline steps
 - [x] Detections & segment scores persisted to SQLite (`sql/schema.sql`, `src/db/load_to_sqlite.py`)
 - [x] Short demo notebook ([`notebooks/demo_pipeline.ipynb`](notebooks/demo_pipeline.ipynb))
-- [ ] (Stretch) Streamlit demo for drag-and-drop inference
+- [x] Streamlit demo: drag-and-drop inference + interactive priority map ([`app/streamlit_app.py`](app/streamlit_app.py))
 
 ---
 
