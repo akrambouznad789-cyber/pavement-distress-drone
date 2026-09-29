@@ -464,6 +464,62 @@ python -m src.db.load_to_sqlite --config configs/config.yaml
 
 ---
 
+## Orchestration (Airflow)
+
+Running nine commands by hand, in the right order, doesn't scale: a real survey service needs the
+pipeline to run on its own each time a flight is uploaded, retry a failed download, and show
+which step broke. [`dags/pavement_pipeline.py`](dags/pavement_pipeline.py) is an **Apache
+Airflow** DAG that orchestrates every step above (except YOLO training, which runs once on a
+GPU):
+
+```mermaid
+flowchart LR
+    P[prepare_dataset] --> S[simulate_survey]
+    N[fetch_road_network] --> S
+    S --> D[detect] --> G[georeference] --> A[aggregate_to_segments]
+    F[fetch_pci_data] --> E[enrich_pci_with_age]
+    A --> M[train_condition_model]
+    E --> M
+    M --> L[load_to_sqlite]
+    A --> Q[export_qgis]
+    M --> R[make_figures]
+    Q --> R
+```
+
+Design choices:
+
+- **Two branches in parallel.** The drone survey and the City of Montréal data don't depend on
+  each other; Airflow runs them side by side and joins them at the condition model.
+- **Idempotent tasks.** Every task can be re-run safely and gives the same result: downloads
+  are skipped when their file already exists, and every other step overwrites its own outputs.
+  Wiring the DAG exposed two steps that weren't: `enrich_with_voirie_age.py` crashed on a second
+  run (its columns already existed), and the SQLite load kept incrementing detection ids across
+  runs (SQLite's `AUTOINCREMENT` counter survives a `DELETE`). Both are fixed.
+- **Retries.** Each task retries once after a minute (e.g. a network hiccup during a download).
+- **Airflow and the pipeline live in separate environments.** Airflow only launches each step as
+  `python -m src.<step>`; the project's own virtualenv (set with `PAVEMENT_PYTHON`) has the ML and
+  geospatial libraries. This avoids dependency conflicts between Airflow and ultralytics/torch.
+- **Reproducible.** A full run through Airflow (12 tasks, about 6 minutes on a laptop CPU)
+  regenerates `outputs/` and the figures, and they match the committed versions: same
+  detections, hotspots, segment scores, model metrics and database.
+
+Airflow runs on Linux/macOS; on Windows, use WSL2. Setup (Airflow 3.3, no admin rights needed):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh          # uv: a fast Python package installer
+uv venv ~/airflow-venv --python 3.14
+VIRTUAL_ENV=~/airflow-venv uv pip install "apache-airflow==3.3.2"   --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.14.txt
+
+scripts/airflow.sh db migrate                      # create Airflow's metadata database
+scripts/airflow.sh dags test pavement_pipeline     # one full run in the terminal
+scripts/airflow.sh standalone                      # or: web UI at http://localhost:8080
+```
+
+[`scripts/airflow.sh`](scripts/airflow.sh) points Airflow at this repo's `dags/` folder and at the
+project's virtualenv (a Windows `.venv` also works from WSL).
+
+---
+
 ## Project structure
 
 ```
@@ -487,6 +543,8 @@ pavement-distress-drone/
 ├── sql/schema.sql                    # the 3-table schema (segments, detections, segment_scores)
 ├── notebooks/demo_pipeline.ipynb     # step-by-step walkthrough, outputs saved
 ├── app/streamlit_app.py              # interactive demo: detection, priority map, condition model
+├── dags/pavement_pipeline.py         # Airflow DAG orchestrating the whole pipeline
+├── scripts/airflow.sh                # runs Airflow against this repo (WSL/Linux)
 ├── assets/sample_images/             # 3 UAV-PDD2023 images for the demo
 ├── figures/                          # committed, reproducible README figures
 ├── data/                             # datasets (git-ignored)
@@ -508,7 +566,7 @@ pavement-distress-drone/
 - [ ] Per-class detector evaluation on a held-out split, with a larger/rebalanced dataset
 - [ ] Orthomosaic support (GeoTIFF affine transform)
 - [x] Real road-network segments (OSM extract, 32 segments) instead of synthetic demo boundaries
-- [ ] Airflow DAG orchestrating the 7 pipeline steps
+- [x] Airflow DAG orchestrating the pipeline ([`dags/pavement_pipeline.py`](dags/pavement_pipeline.py))
 - [x] Detections & segment scores persisted to SQLite (`sql/schema.sql`, `src/db/load_to_sqlite.py`)
 - [x] Short demo notebook ([`notebooks/demo_pipeline.ipynb`](notebooks/demo_pipeline.ipynb))
 - [x] Streamlit demo: drag-and-drop inference + interactive priority map ([`app/streamlit_app.py`](app/streamlit_app.py))

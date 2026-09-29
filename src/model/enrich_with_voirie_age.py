@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import zipfile
-from datetime import datetime
 from pathlib import Path
 
 import geopandas as gpd
@@ -28,7 +27,10 @@ import yaml
 from shapely import wkt
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-CURRENT_YEAR = datetime.now().year
+# Age is measured at the time the city measured the PCI (the 2024 survey file in
+# config.yaml), not "today": that's the age that explains the measured condition, and it
+# keeps the result identical whatever year the pipeline is re-run.
+SURVEY_YEAR = 2024
 
 # Real, drivable pavement categories in the Voirie survey (excludes
 # sidewalks, islands, etc., which aren't in this dataset's CATEGORIECHAUSSEE
@@ -75,7 +77,7 @@ def load_voirie_streets(csv_path: Path, metric_crs: str) -> gpd.GeoDataFrame:
 
     df["year_built"] = df["DATECONSTRUCTION"].apply(_year_from_yyyymmdd_float)
     df["year_resurfaced"] = df["DATERESURFACAGE"].apply(_year_from_yyyymmdd_float)
-    df["pavement_age_years"] = CURRENT_YEAR - df[["year_built", "year_resurfaced"]].max(axis=1)
+    df["pavement_age_years"] = SURVEY_YEAR - df[["year_built", "year_resurfaced"]].max(axis=1)
 
     df["geometry"] = df["GEOMETRY"].apply(wkt.loads)
     gdf = gpd.GeoDataFrame(
@@ -130,7 +132,9 @@ def main(config_path: str):
 
     print("Matching each PCI segment to its real pavement age...")
     matched = match_age_to_segments(segments, voirie)
-    segments = segments.join(matched)
+    # Drop the columns a previous run already added, so this step can be re-run safely
+    # (idempotent) -- an orchestrator like Airflow retries and re-runs steps routinely.
+    segments = segments.drop(columns=["pavement_age_years", "materiau_chaussee"], errors="ignore").join(matched)
 
     n_matched = segments["pavement_age_years"].notna().sum()
     print(f"{n_matched}/{len(segments)} segments matched a real construction/resurfacing date")

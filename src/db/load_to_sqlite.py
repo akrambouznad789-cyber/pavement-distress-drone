@@ -88,6 +88,10 @@ def main(config_path: str):
         conn.execute("DELETE FROM segment_scores")
         conn.execute("DELETE FROM detections")
         conn.execute("DELETE FROM segments")
+        # DELETE doesn't reset AUTOINCREMENT: SQLite keeps the last id in sqlite_sequence, so
+        # without this every re-run would number detections 1048-2094, then 2095-3141, etc.
+        # Resetting it makes the load idempotent: same inputs -> same database, ids included.
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'detections'")
 
         segments.to_sql("segments", conn, if_exists="append", index=False)
         detections.to_sql("detections", conn, if_exists="append", index=False)
